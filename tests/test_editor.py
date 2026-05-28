@@ -72,10 +72,21 @@ class TestUI:
         r = client.get("/")
         assert b"pushHistory" in r.data
 
-    def test_html_has_compact_save(self, client):
+    def test_html_has_save_py(self, client):
         r = client.get("/")
-        assert b"toSaveState" in r.data
-        assert b"v: 2" in r.data
+        assert b"savePy" in r.data
+        assert b"Save .py" in r.data
+
+    def test_html_has_no_json_save_format(self, client):
+        """toSaveState (compact v:2 format) must be fully removed."""
+        r = client.get("/")
+        assert b"toSaveState" not in r.data
+        assert b"loadJSON" not in r.data
+
+    def test_html_has_edge_bridges(self, client):
+        r = client.get("/")
+        assert b"drawEdgeBridges" in r.data
+        assert b"edge-overlay" in r.data
 
     def test_html_has_undo_button(self, client):
         r = client.get("/")

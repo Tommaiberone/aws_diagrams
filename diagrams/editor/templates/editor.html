@@ -102,6 +102,7 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
   display: flex; align-items: center; gap: 5px;
 }
 .toolbar-field label { font-size: 11px; color: #718096; white-space: nowrap; }
+#dirty-dot { display: none; color: #f59e0b; font-size: 11px; line-height: 1; cursor: default; }
 .toolbar-field input, .toolbar-field select {
   height: 28px;
   border: 1px solid var(--border);
@@ -257,6 +258,14 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
 /* Drop overlay while dragging */
 #canvas-wrap.drag-over #cy { outline: 2px dashed var(--accent); }
 
+/* Edge-bridge overlay — sits on top of Cytoscape canvas, ignores mouse events */
+#edge-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+
 /* Floating toolbar over canvas */
 #canvas-hint {
   position: absolute;
@@ -297,6 +306,11 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
   display: flex;
   flex-direction: column;
   border-left: 1px solid #111827;
+  overflow: hidden;
+}
+
+#code-output {
+  min-height: 0;
 }
 
 #code-header {
@@ -432,9 +446,7 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
     <button class="btn" id="btn-new" title="New diagram">⊕ New</button>
     <button class="btn" id="btn-undo" title="Undo (Ctrl+Z)">↩ Undo</button>
     <button class="btn" id="btn-import-py" title="Import a Python diagrams file">📥 Import .py</button>
-    <button class="btn" id="btn-load" title="Load a previously saved JSON state">📂 Load JSON</button>
-    <button class="btn" id="btn-save" title="Save editor state as JSON">💾 Save JSON</button>
-    <input type="file" id="file-input" accept=".json" style="display:none">
+    <button class="btn" id="btn-save" title="Download the generated Python code">💾 Save .py</button>
     <input type="file" id="py-file-input" accept=".py" style="display:none">
 
     <div class="toolbar-sep"></div>
@@ -450,6 +462,7 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
     <div class="toolbar-field">
       <label>Name</label>
       <input id="inp-name" type="text" value="My Diagram" spellcheck="false">
+      <span id="dirty-dot" title="Unsaved changes (Ctrl+S to save)">●</span>
     </div>
 
     <div class="toolbar-field">
@@ -491,7 +504,8 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
   <!-- ──────────────────────────── Canvas ──────────────────────────── -->
   <div id="canvas-wrap">
     <div id="cy"></div>
-    <div id="canvas-hint">Drag nodes from the palette · <b>E</b> to draw edges · <kbd>Del</kbd> to delete · Double-click to rename</div>
+    <canvas id="edge-overlay"></canvas>
+    <div id="canvas-hint">Drag nodes from the palette · <b>E</b> to draw edges · <kbd>Del</kbd> to delete · Double-click to rename · <kbd>Ctrl+Z</kbd> to undo</div>
     <input id="inline-input" type="text">
   </div>
 
@@ -538,6 +552,17 @@ let ctxTarget = null; // element under right-click
 let _uid = 0;
 const uid = () => `id${++_uid}`;
 
+/* ── Dirty / unsaved-changes tracking ── */
+let _dirty = false;
+
+function setDirty(val) {
+  _dirty = val;
+  const dot = document.getElementById('dirty-dot');
+  if (dot) dot.style.display = val ? 'inline' : 'none';
+  const name = document.getElementById('inp-name')?.value || 'My Diagram';
+  document.title = (val ? '● ' : '') + name + ' — Diagrams Editor';
+}
+
 /* ── Undo history ── */
 const _history = [];
 const _MAX_HISTORY = 50;
@@ -545,15 +570,28 @@ let _historyBlocked = false;
 
 function pushHistory() {
   if (_historyBlocked) return;
-  _history.push(JSON.stringify(getState()));
+  _history.push({
+    elements: cy.json().elements,
+    name:  document.getElementById('inp-name').value,
+    dir:   document.getElementById('sel-direction').value,
+    theme: document.getElementById('sel-theme').value,
+  });
   if (_history.length > _MAX_HISTORY) _history.shift();
+  setDirty(true);
 }
 
 function undo() {
-  if (_history.length === 0) return;
-  const prev = JSON.parse(_history.pop());
+  if (!_history.length) return;
+  const snap = _history.pop();
   _historyBlocked = true;
-  restoreState(prev);
+  cy.elements().remove();
+  if (snap.elements) cy.add(snap.elements);
+  document.getElementById('inp-name').value      = snap.name;
+  document.getElementById('sel-direction').value = snap.dir;
+  document.getElementById('sel-theme').value     = snap.theme;
+  cy.fit(undefined, 50);
+  updateCode();
+  setDirty(true);
   _historyBlocked = false;
 }
 
@@ -606,7 +644,7 @@ function initCy() {
         selector: 'node.cluster',
         style: {
           'background-color':   '#f0f7ff',
-          'background-opacity': 0.6,
+          'background-opacity': 0.94,
           'border-color':       '#4f9cf9',
           'border-width':       2,
           'border-style':       'dashed',
@@ -672,6 +710,8 @@ function initCy() {
   cy.on('cxttap', 'node, edge', onCtxTap);
   cy.on('tap', hideCtxMenu);
   cy.on('grabon', 'node', pushHistory);
+  cy.on('render', drawEdgeBridges);
+  cy.on('resize', () => { _syncOverlay(); drawEdgeBridges(); });
 
   /* ── Native edge drawing: click source then target ── */
   cy.on('tap', 'node:not(.cluster)', function (e) {
@@ -727,11 +767,7 @@ function initCy() {
   /* ── Other toolbar ── */
   document.getElementById('btn-undo').addEventListener('click', undo);
   document.getElementById('btn-new').addEventListener('click', newDiagram);
-  document.getElementById('btn-save').addEventListener('click', saveJSON);
-  document.getElementById('btn-load').addEventListener('click', () =>
-    document.getElementById('file-input').click()
-  );
-  document.getElementById('file-input').addEventListener('change', loadJSON);
+  document.getElementById('btn-save').addEventListener('click', savePy);
   document.getElementById('btn-import-py').addEventListener('click', () =>
     document.getElementById('py-file-input').click()
   );
@@ -983,6 +1019,7 @@ function newDiagram() {
   document.getElementById('inp-name').value = 'My Diagram';
   document.getElementById('sel-direction').value = 'LR';
   document.getElementById('sel-theme').value = 'neutral';
+  setDirty(false);
   updateCode();
 }
 
@@ -1043,61 +1080,123 @@ function _lookupIcon(type) {
   return e ? `/api/icons/${e.node.icon}` : '';
 }
 
-/* Compact, token-efficient format for saving to disk (v:2).
-   Strips derived fields (icon, borderColor) and flattens positions. */
-function toSaveState() {
-  const nodes = [], edges = [];
-  cy.elements().forEach(el => {
-    if (el.isNode()) {
-      const d = el.data(), pos = el.position();
-      const n = { id: d.id, label: d.label };
-      if (d.isCluster) n.cluster = true;
-      else n.type = d.type;
-      if (d.parent) n.parent = d.parent;
-      n.x = Math.round(pos.x);
-      n.y = Math.round(pos.y);
-      nodes.push(n);
-    } else {
-      const d = el.data();
-      const e = { id: d.id, src: d.source, tgt: d.target };
-      if (d.label) e.label = d.label;
-      edges.push(e);
-    }
-  });
-  const state = {
-    v: 2,
-    name: document.getElementById('inp-name').value,
-    dir:  document.getElementById('sel-direction').value,
-    nodes, edges,
-  };
-  const theme = document.getElementById('sel-theme').value;
-  if (theme && theme !== 'neutral') state.theme = theme;
-  return state;
+
+/* ============================================================
+   Edge-bridge overlay
+   ============================================================ */
+let _overlayCvs = null;
+
+function _syncOverlay() {
+  if (!_overlayCvs) {
+    _overlayCvs = document.getElementById('edge-overlay');
+  }
+  _overlayCvs.width  = cy.width();
+  _overlayCvs.height = cy.height();
 }
 
-function saveJSON() {
-  const state = toSaveState();
-  const blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+function drawEdgeBridges() {
+  if (!cy) return;
+  if (!_overlayCvs) _syncOverlay();
+  const w = cy.width(), h = cy.height();
+  if (_overlayCvs.width !== w || _overlayCvs.height !== h) _syncOverlay();
+
+  const ctx = _overlayCvs.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+
+  const zoom = cy.zoom();
+  if (zoom < 0.12) return;
+
+  const edges = cy.edges(':visible').toArray();
+  if (edges.length < 2) return;
+
+  // Approximate taxi path in rendered (screen) coordinates.
+  // With taxi-direction:auto and taxi-turn:50%, Cytoscape routes:
+  //   |dx| >= |dy|  →  H-V-H  (horizontal first)
+  //   |dx|  < |dy|  →  V-H-V  (vertical first)
+  function taxiPath(edge) {
+    const s = edge.source().renderedPosition();
+    const t = edge.target().renderedPosition();
+    if (!s || !t) return null;
+    const mx = (s.x + t.x) / 2, my = (s.y + t.y) / 2;
+    return Math.abs(s.x - t.x) >= Math.abs(s.y - t.y)
+      ? [[s.x, s.y], [mx, s.y], [mx, t.y], [t.x, t.y]]
+      : [[s.x, s.y], [s.x, my], [t.x, my], [t.x, t.y]];
+  }
+
+  // Segment intersection; returns crossing point or null.
+  // t/u in (0.05, 0.95) avoids near-endpoint false positives.
+  function cross(a1, a2, b1, b2) {
+    const dx1 = a2[0]-a1[0], dy1 = a2[1]-a1[1];
+    const dx2 = b2[0]-b1[0], dy2 = b2[1]-b1[1];
+    const d   = dx1*dy2 - dy1*dx2;
+    if (Math.abs(d) < 0.5) return null;
+    const t = ((b1[0]-a1[0])*dy2 - (b1[1]-a1[1])*dx2) / d;
+    const u = ((b1[0]-a1[0])*dy1 - (b1[1]-a1[1])*dx1) / d;
+    return (t > 0.05 && t < 0.95 && u > 0.05 && u < 0.95)
+      ? [a1[0]+t*dx1, a1[1]+t*dy1] : null;
+  }
+
+  const paths = edges.map(taxiPath);
+  const R  = Math.max(3.5, 5 * zoom);   // bridge arc radius
+  const lw = Math.max(1.5, 2 * zoom);   // line width
+  const BG = getComputedStyle(document.documentElement)
+               .getPropertyValue('--canvas-bg').trim() || '#fafbfc';
+
+  for (let i = 0; i < edges.length - 1; i++) {
+    const pi = paths[i];
+    if (!pi) continue;
+    for (let j = i + 1; j < edges.length; j++) {
+      const pj = paths[j];
+      if (!pj) continue;
+      for (let si = 0; si < pi.length - 1; si++) {
+        for (let sj = 0; sj < pj.length - 1; sj++) {
+          const pt = cross(pi[si], pi[si+1], pj[sj], pj[sj+1]);
+          if (!pt) continue;
+
+          // Edge j arcs over edge i.
+          // Draw white gap along edge i's direction to "cut" it.
+          const iH = Math.abs(pi[si+1][1] - pi[si][1]) < 1;
+          ctx.save();
+          ctx.strokeStyle = BG;
+          ctx.lineWidth   = lw + 4;
+          ctx.lineCap     = 'butt';
+          ctx.beginPath();
+          if (iH) { ctx.moveTo(pt[0]-R*1.4, pt[1]); ctx.lineTo(pt[0]+R*1.4, pt[1]); }
+          else    { ctx.moveTo(pt[0], pt[1]-R*1.4); ctx.lineTo(pt[0], pt[1]+R*1.4); }
+          ctx.stroke();
+          ctx.restore();
+
+          // Bridge arc on edge j, direction based on j's segment.
+          const jH    = Math.abs(pj[sj+1][1] - pj[sj][1]) < 1;
+          const color = edges[j].style('line-color') || '#718096';
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth   = lw;
+          ctx.lineCap     = 'round';
+          ctx.beginPath();
+          if (jH) ctx.arc(pt[0], pt[1], R, Math.PI, 0, true);            // dome up
+          else    ctx.arc(pt[0], pt[1], R, -Math.PI/2, Math.PI/2, false); // dome right
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    }
+  }
+}
+
+function savePy() {
+  const code = document.getElementById('code-output').textContent;
+  if (!code.trim() || code.startsWith('#')) {
+    alert('Nothing to save — add some nodes first.');
+    return;
+  }
+  const name = document.getElementById('inp-name').value || 'diagram';
+  const blob = new Blob([code], { type: 'text/x-python' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (state.name || 'diagram').replace(/\s+/g, '_') + '.json';
+  a.download = name.replace(/\s+/g, '_') + '.py';
   a.click();
-}
-
-function loadJSON(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = evt => {
-    try {
-      const state = JSON.parse(evt.target.result);
-      restoreState(state);
-    } catch {
-      alert('Invalid JSON file.');
-    }
-  };
-  reader.readAsText(file);
-  e.target.value = '';
+  setDirty(false);
 }
 
 async function importPy(e) {
@@ -1121,7 +1220,8 @@ async function importPy(e) {
       alert(`Import failed:\n\n${data.error || 'Unknown error'}`);
       return;
     }
-    restoreState(data, /* runLayout= */ true);
+    restoreState(data);
+    setDirty(false);
   } catch (err) {
     alert(`Import error: ${err}`);
   } finally {
@@ -1244,6 +1344,11 @@ function hideCtxMenu() {
    Keyboard
    ============================================================ */
 function onKeyDown(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    savePy();
+    return;
+  }
   if (e.target.matches('input, textarea, select')) return;
 
   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -1288,7 +1393,7 @@ function getState() {
   };
 }
 
-function restoreState(state, runLayout = false) {
+function restoreState(state) {
   cy.elements().remove();
 
   const elements = [];
@@ -1322,20 +1427,7 @@ function restoreState(state, runLayout = false) {
   document.getElementById('sel-direction').value = state.dir   || 'LR';
   document.getElementById('sel-theme').value     = state.theme || 'neutral';
 
-  if (runLayout && cy.nodes().length > 0) {
-    cy.layout({
-      name: 'cose',
-      padding: 60,
-      nodeRepulsion: () => 12000,
-      idealEdgeLength: () => 120,
-      animate: true,
-      animationDuration: 500,
-      fit: true,
-      randomize: false,
-    }).run();
-  } else {
-    cy.fit(undefined, 40);
-  }
+  cy.fit(undefined, 50);
   updateCode();
 }
 
@@ -1385,6 +1477,12 @@ function debounce(fn, ms) {
 /* ============================================================
    Boot
    ============================================================ */
+window.addEventListener('beforeunload', e => {
+  if (!_dirty) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+
 window.addEventListener('DOMContentLoaded', async () => {
   try {
     initCy();
