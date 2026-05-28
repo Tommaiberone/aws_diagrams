@@ -17,7 +17,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-editor = ["flask>=2.0"]
+editor     = ["flask>=2.0"]
+screenshot = ["flask>=2.0", "playwright>=1.44"]
 
 [project.scripts]
 diagrams = "diagrams.cli:main"

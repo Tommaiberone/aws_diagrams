@@ -132,38 +132,41 @@ The user can now open **http://localhost:8888** in their browser to:
 
 ### Step 5 — Export the PNG
 
-Export the final PNG directly via the render API (no browser interaction needed):
+Export the diagram as a PNG using the `diagrams export` command. It spins up a
+temporary headless Chromium browser, renders the canvas (including edge-bridge
+overlays) at 2× resolution, and saves the PNG — no human interaction required.
 
-```python
-import json, pathlib, urllib.request
+**One-time setup** (only needed once per environment):
 
-code = pathlib.Path("docs/architecture/<diagram-name>.py").read_text()
-payload = json.dumps({"code": code, "format": "png"}).encode()
-req = urllib.request.Request(
-    "http://localhost:8888/api/render",
-    data=payload,
-    headers={"Content-Type": "application/json"},
-    method="POST",
-)
-with urllib.request.urlopen(req, timeout=30) as r:
-    if r.status != 200:
-        raise RuntimeError(r.read().decode())
-    out = pathlib.Path("docs/architecture/<diagram-name>.png")
-    out.write_bytes(r.read())
-    print(f"PNG saved to {out}")
+```bash
+pip install playwright
+playwright install chromium
 ```
 
-If the user has visually edited the diagram in the browser and saved the updated `.py` (Ctrl+S), re-read that file before calling `/api/render` so the PNG reflects their edits.
+**Export:**
+
+```bash
+diagrams export docs/architecture/<diagram-name>.py docs/architecture/<diagram-name>.png
+```
+
+Optional flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--width` / `--height` | 1600 × 900 | Browser viewport size |
+| `--scale` | 2 | Output resolution multiplier |
+| `--port` | auto | Internal server port |
+
+The output is pixel-identical to clicking **⬇ Export PNG** in the browser UI.
 
 #### Troubleshooting
 
 | Error | Fix |
 |---|---|
-| `ModuleNotFoundError: No module named 'diagrams'` | `pip install "diagrams[editor]"` |
-| `command not found: dot` / `ExecutableNotFound` | Install Graphviz: `choco install graphviz` (Win) / `sudo apt-get install graphviz` (Linux) |
+| `ModuleNotFoundError: No module named 'playwright'` | `pip install playwright && playwright install chromium` |
+| `ModuleNotFoundError: No module named 'diagrams'` | `pip install "diagrams[screenshot]"` |
 | `ImportError: cannot import name 'X'` | Wrong module path — validate with `python -c "from diagrams.aws.Y import X"` |
-| Port 8888 in use | Pass `--port 8889` and update the API URLs accordingly |
-| Render times out | Large diagrams can take 10–20 s; increase `timeout=` in the urllib call |
+| Port conflict | Pass `--port 8889` (or any free port) |
 
 ### Step 6 — Report output
 

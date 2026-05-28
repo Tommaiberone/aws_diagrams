@@ -35,6 +35,25 @@ def _run_editor(args) -> None:
     launch(port=args.port, open_browser=not args.no_browser)
 
 
+def _run_export(args) -> None:
+    from pathlib import Path
+    from diagrams.editor.screenshot import export_png
+
+    input_path  = Path(args.input)
+    output_path = Path(args.output) if args.output else input_path.with_suffix(".png")
+
+    print(f"Exporting {input_path} → {output_path} …")
+    export_png(
+        input_path.read_text(encoding="utf-8"),
+        output_path,
+        port=args.port,
+        viewport_width=args.width,
+        viewport_height=args.height,
+        scale=args.scale,
+    )
+    print(f"Saved: {output_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="diagrams",
@@ -53,10 +72,21 @@ def main():
     ed_p.add_argument("--no-browser", action="store_true",
                       help="Don't open the browser automatically")
 
+    # ── export ──
+    ex_p = sub.add_parser("export", help="Export a .py diagram to PNG (headless browser)")
+    ex_p.add_argument("input",  help="Python diagrams source file (.py)")
+    ex_p.add_argument("output", nargs="?", help="Output PNG path (default: <input>.png)")
+    ex_p.add_argument("--port",   type=int, default=0,    help="Internal server port (0 = auto)")
+    ex_p.add_argument("--width",  type=int, default=1600, help="Browser viewport width (default: 1600)")
+    ex_p.add_argument("--height", type=int, default=900,  help="Browser viewport height (default: 900)")
+    ex_p.add_argument("--scale",  type=int, default=2,    help="Output resolution multiplier (default: 2)")
+
     args = parser.parse_args()
 
     if args.command == "editor":
         _run_editor(args)
+    elif args.command == "export":
+        _run_export(args)
     elif args.command == "run":
         for path in args.paths:
             with open(path, encoding="utf-8") as f:
