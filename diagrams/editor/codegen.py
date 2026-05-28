@@ -119,10 +119,15 @@ def _write_node(lines: list, data: dict, var_names: dict, indent: str) -> None:
 
 def _assign_var_names(nodes: list) -> dict[str, str]:
     """Unique, readable Python variable name per node id."""
+    import keyword
+
+    def _safe(base: str) -> str:
+        return f"{base}_svc" if keyword.iskeyword(base) else base
+
     total: dict[str, int] = defaultdict(int)
     for node in nodes:
         parts = node.get("data", {}).get("type", "").split(".")
-        base = parts[-1].lower() if parts and parts[-1] else "node"
+        base = _safe(parts[-1].lower() if parts and parts[-1] else "node")
         total[base] += 1
 
     usage: dict[str, int] = defaultdict(int)
@@ -130,7 +135,7 @@ def _assign_var_names(nodes: list) -> dict[str, str]:
     for node in nodes:
         nid = node["data"]["id"]
         parts = node.get("data", {}).get("type", "").split(".")
-        base = parts[-1].lower() if parts and parts[-1] else "node"
+        base = _safe(parts[-1].lower() if parts and parts[-1] else "node")
         usage[base] += 1
         names[nid] = base if total[base] == 1 else f"{base}_{usage[base]}"
     return names

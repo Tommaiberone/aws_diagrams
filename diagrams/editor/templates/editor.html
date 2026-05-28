@@ -488,6 +488,7 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
 
     <div class="toolbar-spacer"></div>
 
+    <button class="btn" id="btn-export-png" title="Download canvas as PNG">⬇ Export PNG</button>
     <button class="btn primary" id="btn-preview">▶ Preview</button>
   </div>
 
@@ -773,6 +774,7 @@ function initCy() {
   );
   document.getElementById('py-file-input').addEventListener('change', importPy);
   document.getElementById('btn-cluster').addEventListener('click', addCluster);
+  document.getElementById('btn-export-png').addEventListener('click', exportPng);
   document.getElementById('btn-preview').addEventListener('click', openPreview);
   document.getElementById('btn-copy').addEventListener('click', copyCode);
   document.getElementById('preview-close').addEventListener('click', closePreview);
@@ -1237,6 +1239,23 @@ async function copyCode() {
   btn.textContent = '✓ Copied!';
   btn.classList.add('copied');
   setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1800);
+}
+
+/* ============================================================
+   Export PNG  (Cytoscape canvas snapshot — no backend needed)
+   ============================================================ */
+function exportPng() {
+  if (cy.nodes().length === 0) {
+    alert('Canvas is empty — add some nodes first.');
+    return;
+  }
+  const blob = cy.png({ output: 'blob', full: true, scale: 2, bg: '#fafbfc' });
+  const name = document.getElementById('inp-name').value || 'diagram';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name.replace(/\s+/g, '_') + '.png';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ============================================================
