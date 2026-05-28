@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagrams Editor</title>
+
+<!-- Cytoscape.js core only — no unreliable CDN plugins -->
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+
+<style>
+/* ───────────────────────────── Reset & Variables ───────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --sidebar-w: 260px;
+  --code-w:    320px;
+  --toolbar-h: 46px;
+
+  --bg:           #f0f2f5;
+  --sidebar-bg:   #1a1f2e;
+  --sidebar-text: #c8d3e8;
+  --sidebar-muted:#6b7899;
+  --sidebar-hover:#252d42;
+  --sidebar-active:#2e3a54;
+  --accent:       #4f9cf9;
+  --accent-dim:   #1e3a5f;
+  --canvas-bg:    #fafbfc;
+  --toolbar-bg:   #ffffff;
+  --border:       #e2e8f0;
+  --text:         #2d3748;
+  --code-bg:      #1a1f2e;
+  --code-text:    #a8d8f0;
+  --code-string:  #98c379;
+  --code-kw:      #c678dd;
+  --danger:       #e53e3e;
+  --success:      #38a169;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 13px;
+}
+
+body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); }
+
+/* ───────────────────────────── Layout ───────────────────────────── */
+#app {
+  display: grid;
+  grid-template-rows: var(--toolbar-h) 1fr;
+  grid-template-columns: var(--sidebar-w) 1fr var(--code-w);
+  height: 100vh;
+}
+
+/* ───────────────────────────── Toolbar ───────────────────────────── */
+#toolbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  user-select: none;
+  z-index: 10;
+}
+
+.toolbar-brand {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--accent);
+  letter-spacing: -0.3px;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+.toolbar-sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+
+.btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  transition: background .12s, border-color .12s;
+}
+.btn:hover { background: #f7f9fc; border-color: #c5ccd8; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: #3b89f5; }
+.btn.active { background: #ebf3ff; border-color: var(--accent); color: var(--accent); }
+.btn.danger { background: #fff5f5; border-color: #feb2b2; color: var(--danger); }
+.btn.danger:hover { background: #fee2e2; }
+
+.toolbar-field {
+  display: flex; align-items: center; gap: 5px;
+}
+.toolbar-field label { font-size: 11px; color: #718096; white-space: nowrap; }
+.toolbar-field input, .toolbar-field select {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0 8px;
+  font-size: 12px;
+  background: #fff;
+  color: var(--text);
+}
+.toolbar-field input { width: 160px; }
+.toolbar-field select { padding-right: 4px; }
+
+.toolbar-spacer { flex: 1; }
+
+/* ───────────────────────────── Palette ───────────────────────────── */
+#palette {
+  grid-column: 1;
+  grid-row: 2;
+  background: var(--sidebar-bg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #111827;
+}
+
+#palette-search-wrap {
+  padding: 10px;
+  border-bottom: 1px solid #111827;
+  flex-shrink: 0;
+}
+
+#palette-search {
+  width: 100%;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid #2d3748;
+  background: #111827;
+  color: var(--sidebar-text);
+  padding: 0 10px;
+  font-size: 12px;
+  outline: none;
+}
+#palette-search::placeholder { color: var(--sidebar-muted); }
+#palette-search:focus { border-color: var(--accent); }
+
+#palette-list {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #2d3748 transparent;
+}
+#palette-list::-webkit-scrollbar { width: 4px; }
+#palette-list::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 2px; }
+
+.provider-group {}
+
+.provider-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  color: var(--sidebar-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  transition: color .12s;
+}
+.provider-header:hover { color: var(--sidebar-text); }
+.provider-header .chevron { transition: transform .2s; font-size: 8px; }
+.provider-header.open .chevron { transform: rotate(90deg); }
+
+.provider-modules { display: none; }
+.provider-modules.open { display: block; }
+
+.module-header {
+  padding: 5px 12px 5px 22px;
+  font-size: 11px;
+  color: var(--sidebar-muted);
+  cursor: pointer;
+  display: flex; align-items: center; gap: 5px;
+  transition: color .12s, background .12s;
+}
+.module-header:hover { color: var(--sidebar-text); background: var(--sidebar-hover); }
+.module-header .chevron { font-size: 8px; transition: transform .2s; }
+.module-header.open .chevron { transform: rotate(90deg); }
+
+.module-nodes { display: none; }
+.module-nodes.open { display: block; }
+
+.node-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px 8px 8px;
+}
+
+.palette-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  cursor: grab;
+  transition: background .12s;
+  user-select: none;
+}
+.palette-node:hover { background: var(--sidebar-hover); }
+.palette-node:active { cursor: grabbing; }
+.palette-node img {
+  width: 32px; height: 32px;
+  object-fit: contain;
+  pointer-events: none;
+}
+.palette-node span {
+  font-size: 9px;
+  color: var(--sidebar-muted);
+  text-align: center;
+  line-height: 1.2;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+.palette-node:hover span { color: var(--sidebar-text); }
+
+/* Loading / empty state */
+.palette-status {
+  padding: 20px 12px;
+  color: var(--sidebar-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* ───────────────────────────── Canvas ───────────────────────────── */
+#canvas-wrap {
+  grid-column: 2;
+  grid-row: 2;
+  background: var(--canvas-bg);
+  position: relative;
+  overflow: hidden;
+}
+
+#cy {
+  width: 100%;
+  height: 100%;
+}
+
+/* Drop overlay while dragging */
+#canvas-wrap.drag-over #cy { outline: 2px dashed var(--accent); }
+
+/* Floating toolbar over canvas */
+#canvas-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(26,31,46,.85);
+  backdrop-filter: blur(4px);
+  color: #9eb0cc;
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Inline label editor */
+#inline-input {
+  position: absolute;
+  display: none;
+  border: 1.5px solid var(--accent);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+  padding: 2px 6px;
+  font-size: 12px;
+  outline: none;
+  min-width: 80px;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+
+/* ───────────────────────────── Code Panel ───────────────────────────── */
+#code-panel {
+  grid-column: 3;
+  grid-row: 2;
+  background: var(--code-bg);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid #111827;
+}
+
+#code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #111827;
+  flex-shrink: 0;
+}
+#code-header span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sidebar-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#btn-copy {
+  height: 22px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid #2d3748;
+  border-radius: 4px;
+  color: var(--sidebar-muted);
+  font-size: 10px;
+  cursor: pointer;
+  transition: color .12s, border-color .12s;
+}
+#btn-copy:hover { color: var(--sidebar-text); border-color: #4a5568; }
+#btn-copy.copied { color: var(--success); border-color: var(--success); }
+
+#code-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--code-text);
+  white-space: pre;
+  scrollbar-width: thin;
+  scrollbar-color: #2d3748 transparent;
+  tab-size: 4;
+}
+#code-output::-webkit-scrollbar { width: 4px; }
+#code-output::-webkit-scrollbar-thumb { background: #2d3748; }
+
+/* Simple syntax highlight classes */
+.kw  { color: #c678dd; }
+.st  { color: #98c379; }
+.cm  { color: #5c6370; font-style: italic; }
+.fn  { color: #61aeee; }
+
+/* ───────────────────────────── Preview Modal ───────────────────────────── */
+#preview-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+#preview-modal.open { display: flex; }
+
+#preview-box {
+  background: #fff;
+  border-radius: 10px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow: auto;
+  padding: 20px;
+  position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,.4);
+}
+
+#preview-box img {
+  display: block;
+  max-width: 100%;
+}
+
+#preview-close {
+  position: absolute;
+  top: 10px; right: 12px;
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #718096;
+}
+#preview-close:hover { color: var(--danger); }
+
+#preview-spinner {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 260px; min-height: 100px;
+  color: #718096; font-size: 13px; gap: 10px;
+}
+
+/* ───────────────────────────── Context Menu ───────────────────────────── */
+#ctx-menu {
+  display: none;
+  position: fixed;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  z-index: 500;
+  font-size: 12px;
+}
+.ctx-item {
+  padding: 7px 14px;
+  cursor: pointer;
+  color: var(--text);
+  display: flex; align-items: center; gap: 8px;
+}
+.ctx-item:hover { background: #f7f9fc; }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item.danger:hover { background: #fff5f5; }
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ──────────────────────────── Toolbar ──────────────────────────── -->
+  <div id="toolbar">
+    <span class="toolbar-brand">⬡ Diagrams Editor</span>
+
+    <button class="btn" id="btn-new" title="New diagram">⊕ New</button>
+    <button class="btn" id="btn-undo" title="Undo (Ctrl+Z)">↩ Undo</button>
+    <button class="btn" id="btn-import-py" title="Import a Python diagrams file">📥 Import .py</button>
+    <button class="btn" id="btn-load" title="Load a previously saved JSON state">📂 Load JSON</button>
+    <button class="btn" id="btn-save" title="Save editor state as JSON">💾 Save JSON</button>
+    <input type="file" id="file-input" accept=".json" style="display:none">
+    <input type="file" id="py-file-input" accept=".py" style="display:none">
+
+    <div class="toolbar-sep"></div>
+
+    <button class="btn" id="btn-cluster" title="Add a cluster (group) node">⬡ Add Cluster</button>
+
+    <div class="toolbar-sep"></div>
+
+    <button class="btn" id="btn-draw" title="Toggle edge-draw mode (E)">✏️ Draw Edge</button>
+
+    <div class="toolbar-sep"></div>
+
+    <div class="toolbar-field">
+      <label>Name</label>
+      <input id="inp-name" type="text" value="My Diagram" spellcheck="false">
+    </div>
+
+    <div class="toolbar-field">
+      <label>Dir</label>
+      <select id="sel-direction">
+        <option value="LR">Left → Right</option>
+        <option value="TB">Top → Bottom</option>
+        <option value="RL">Right → Left</option>
+        <option value="BT">Bottom → Top</option>
+      </select>
+    </div>
+
+    <div class="toolbar-field">
+      <label>Theme</label>
+      <select id="sel-theme">
+        <option value="neutral">Neutral</option>
+        <option value="pastel">Pastel</option>
+        <option value="blues">Blues</option>
+        <option value="greens">Greens</option>
+        <option value="orange">Orange</option>
+      </select>
+    </div>
+
+    <div class="toolbar-spacer"></div>
+
+    <button class="btn primary" id="btn-preview">▶ Preview</button>
+  </div>
+
+  <!-- ──────────────────────────── Palette ──────────────────────────── -->
+  <div id="palette">
+    <div id="palette-search-wrap">
+      <input id="palette-search" type="search" placeholder="Search nodes…" autocomplete="off">
+    </div>
+    <div id="palette-list">
+      <div class="palette-status">Loading nodes…</div>
+    </div>
+  </div>
+
+  <!-- ──────────────────────────── Canvas ──────────────────────────── -->
+  <div id="canvas-wrap">
+    <div id="cy"></div>
+    <div id="canvas-hint">Drag nodes from the palette · <b>E</b> to draw edges · <kbd>Del</kbd> to delete · Double-click to rename</div>
+    <input id="inline-input" type="text">
+  </div>
+
+  <!-- ──────────────────────────── Code Panel ──────────────────────────── -->
+  <div id="code-panel">
+    <div id="code-header">
+      <span>Python Code</span>
+      <button id="btn-copy">Copy</button>
+    </div>
+    <div id="code-output">
+      <span class="cm"># Add nodes from the palette to get started</span>
+    </div>
+  </div>
+</div>
+
+<!-- ──────────────────────────── Preview Modal ──────────────────────────── -->
+<div id="preview-modal">
+  <div id="preview-box">
+    <button id="preview-close" title="Close">✕</button>
+    <div id="preview-content">
+      <div id="preview-spinner">⏳ Rendering diagram…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ──────────────────────────── Context Menu ──────────────────────────── -->
+<div id="ctx-menu">
+  <div class="ctx-item" id="ctx-rename">✏️ Rename</div>
+  <div class="ctx-item" id="ctx-to-cluster">⬡ Move to Cluster…</div>
+  <div class="ctx-item" id="ctx-from-cluster">⤴ Remove from Cluster</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item danger" id="ctx-delete">🗑 Delete</div>
+</div>
+
+<!-- ───────────────────────────────── JS ─────────────────────────────────── -->
+<script>
+/* ============================================================
+   Globals & helpers
+   ============================================================ */
+let cy = null;
+let drawMode = false;
+let drawSrc = null;   // source node while drawing an edge
+let ctxTarget = null; // element under right-click
+let _uid = 0;
+const uid = () => `id${++_uid}`;
+
+/* ── Undo history ── */
+const _history = [];
+const _MAX_HISTORY = 50;
+let _historyBlocked = false;
+
+function pushHistory() {
+  if (_historyBlocked) return;
+  _history.push(JSON.stringify(getState()));
+  if (_history.length > _MAX_HISTORY) _history.shift();
+}
+
+function undo() {
+  if (_history.length === 0) return;
+  const prev = JSON.parse(_history.pop());
+  _historyBlocked = true;
+  restoreState(prev);
+  _historyBlocked = false;
+}
+
+/* ============================================================
+   Cytoscape initialisation
+   ============================================================ */
+function initCy() {
+
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    wheelSensitivity: 0.25,
+    boxSelectionEnabled: true,
+    style: [
+      /* ── Regular node ── */
+      {
+        selector: 'node:not(.cluster)',
+        style: {
+          'background-color':       '#ffffff',
+          'background-image':       'data(icon)',
+          'background-fit':         'contain',
+          'background-clip':        'none',
+          'background-image-opacity': 1,
+          'border-color':           'data(borderColor)',
+          'border-width':           2,
+          'width':                  56,
+          'height':                 56,
+          'shape':                  'round-rectangle',
+          'label':                  'data(label)',
+          'font-size':              10,
+          'font-family':            '"Segoe UI", sans-serif',
+          'color':                  '#2d3748',
+          'text-valign':            'bottom',
+          'text-halign':            'center',
+          'text-margin-y':          4,
+          'text-max-width':         80,
+          'text-wrap':              'ellipsis',
+          'padding':                6,
+        },
+      },
+      /* ── Selected node ── */
+      {
+        selector: 'node:not(.cluster):selected',
+        style: {
+          'border-color': '#4f9cf9',
+          'border-width': 3,
+        },
+      },
+      /* ── Cluster compound node ── */
+      {
+        selector: 'node.cluster',
+        style: {
+          'background-color':   '#f0f7ff',
+          'background-opacity': 0.6,
+          'border-color':       '#4f9cf9',
+          'border-width':       2,
+          'border-style':       'dashed',
+          'label':              'data(label)',
+          'font-size':          12,
+          'font-weight':        600,
+          'color':              '#2563eb',
+          'text-valign':        'top',
+          'text-halign':        'center',
+          'text-margin-y':      -4,
+          'padding':            30,
+          'shape':              'round-rectangle',
+          'compound-sizing-wrt-labels': 'include',
+        },
+      },
+      {
+        selector: 'node.cluster:selected',
+        style: { 'border-color': '#2563eb', 'border-width': 3 },
+      },
+      /* ── Edge ── */
+      {
+        selector: 'edge',
+        style: {
+          'width':                  2,
+          'line-color':             '#718096',
+          'target-arrow-color':     '#718096',
+          'target-arrow-shape':     'triangle',
+          'curve-style':            'taxi',
+          'taxi-direction':         'auto',
+          'corner-radius':          8,
+          'label':                  'data(label)',
+          'font-size':              10,
+          'color':                  '#718096',
+          'text-background-opacity': 1,
+          'text-background-color':  '#fafbfc',
+          'text-background-padding': 2,
+        },
+      },
+      {
+        selector: 'edge:selected',
+        style: {
+          'line-color':         '#4f9cf9',
+          'target-arrow-color': '#4f9cf9',
+        },
+      },
+      /* ── Draw-mode source highlight ── */
+      {
+        selector: 'node.draw-source',
+        style: {
+          'border-color': '#4f9cf9',
+          'border-width': 4,
+          'border-style': 'dashed',
+        },
+      },
+    ],
+    layout: { name: 'preset' },
+  });
+
+  /* ── Events ── */
+  cy.on('add remove data move', debounce(updateCode, 300));
+  cy.on('dbltap', 'node', onNodeDblTap);
+  cy.on('dbltap', 'edge', onEdgeDblTap);
+  cy.on('cxttap', 'node, edge', onCtxTap);
+  cy.on('tap', hideCtxMenu);
+  cy.on('grabon', 'node', pushHistory);
+
+  /* ── Native edge drawing: click source then target ── */
+  cy.on('tap', 'node:not(.cluster)', function (e) {
+    if (!drawMode) return;
+    const node = e.target;
+    if (!drawSrc) {
+      drawSrc = node;
+      cy.$('.draw-source').removeClass('draw-source');
+      node.addClass('draw-source');
+      setHint('Now click the <b>target</b> node · <b>Esc</b> to cancel');
+    } else if (drawSrc.id() !== node.id()) {
+      pushHistory();
+      cy.add({ group: 'edges', data: { id: uid(), source: drawSrc.id(), target: node.id(), label: '' } });
+      drawSrc.removeClass('draw-source');
+      drawSrc = null;
+      disableDrawMode();
+      updateCode();
+    }
+  });
+  cy.on('tap', function (e) {
+    if (drawMode && e.target === cy) {
+      drawSrc = null;
+      cy.$('.draw-source').removeClass('draw-source');
+      setHint('Click a <b>source</b> node to start an edge · <b>Esc</b> to cancel');
+    }
+  });
+
+  /* ── Keyboard ── */
+  document.addEventListener('keydown', onKeyDown);
+
+  /* ── Toolbar events ── */
+  document.getElementById('inp-name').addEventListener('input', debounce(updateCode, 300));
+  document.getElementById('sel-direction').addEventListener('change', updateCode);
+  document.getElementById('sel-theme').addEventListener('change', updateCode);
+
+  /* ── Draw-mode toggle ── */
+  document.getElementById('btn-draw').addEventListener('click', toggleDrawMode);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'e' && !e.target.matches('input,textarea')) toggleDrawMode();
+  });
+
+  /* ── Drag-drop from palette ── */
+  const canvasWrap = document.getElementById('canvas-wrap');
+  canvasWrap.addEventListener('dragover', e => {
+    e.preventDefault();
+    canvasWrap.classList.add('drag-over');
+  });
+  canvasWrap.addEventListener('dragleave', () => {
+    canvasWrap.classList.remove('drag-over');
+  });
+  canvasWrap.addEventListener('drop', onCanvasDrop);
+
+  /* ── Other toolbar ── */
+  document.getElementById('btn-undo').addEventListener('click', undo);
+  document.getElementById('btn-new').addEventListener('click', newDiagram);
+  document.getElementById('btn-save').addEventListener('click', saveJSON);
+  document.getElementById('btn-load').addEventListener('click', () =>
+    document.getElementById('file-input').click()
+  );
+  document.getElementById('file-input').addEventListener('change', loadJSON);
+  document.getElementById('btn-import-py').addEventListener('click', () =>
+    document.getElementById('py-file-input').click()
+  );
+  document.getElementById('py-file-input').addEventListener('change', importPy);
+  document.getElementById('btn-cluster').addEventListener('click', addCluster);
+  document.getElementById('btn-preview').addEventListener('click', openPreview);
+  document.getElementById('btn-copy').addEventListener('click', copyCode);
+  document.getElementById('preview-close').addEventListener('click', closePreview);
+
+  /* ── Context menu actions ── */
+  document.getElementById('ctx-rename').addEventListener('click', () => {
+    hideCtxMenu();
+    if (ctxTarget && ctxTarget.isNode()) startInlineEdit(ctxTarget);
+  });
+  document.getElementById('ctx-delete').addEventListener('click', () => {
+    hideCtxMenu();
+    if (ctxTarget) { pushHistory(); ctxTarget.remove(); updateCode(); }
+  });
+  document.getElementById('ctx-to-cluster').addEventListener('click', () => {
+    hideCtxMenu();
+    if (!ctxTarget || !ctxTarget.isNode() || ctxTarget.hasClass('cluster')) return;
+    const clusters = cy.nodes('.cluster');
+    if (clusters.empty()) { alert('No clusters in the diagram yet. Add one first.'); return; }
+    const names = clusters.map(c => c.data('label')).join('\n');
+    const choice = prompt(`Move to which cluster?\n\n${names}`);
+    if (!choice) return;
+    const target = clusters.filter(c => c.data('label') === choice.trim()).first();
+    if (target.length) {
+      pushHistory();
+      ctxTarget.move({ parent: target.id() });
+      updateCode();
+    }
+  });
+  document.getElementById('ctx-from-cluster').addEventListener('click', () => {
+    hideCtxMenu();
+    if (ctxTarget && ctxTarget.isNode()) {
+      pushHistory();
+      ctxTarget.move({ parent: null });
+      updateCode();
+    }
+  });
+
+  document.addEventListener('click', hideCtxMenu);
+}
+
+/* ============================================================
+   Provider border colours
+   ============================================================ */
+const PROVIDER_COLORS = {
+  aws:          '#FF9900',
+  azure:        '#0089D6',
+  gcp:          '#4285F4',
+  k8s:          '#326CE5',
+  alibabacloud: '#FF6A00',
+  digitalocean: '#0080FF',
+  elastic:      '#005571',
+  firebase:     '#FFCA28',
+  generic:      '#718096',
+  ibm:          '#1261FE',
+  oci:          '#C74634',
+  onprem:       '#718096',
+  openstack:    '#ED1944',
+  outscale:     '#5B4FBF',
+  programming:  '#2d9a67',
+  saas:         '#00b4e4',
+  c4:           '#888888',
+};
+
+function providerColor(type) {
+  const p = (type || '').split('.')[0];
+  return PROVIDER_COLORS[p] || '#718096';
+}
+
+/* ============================================================
+   Palette loading
+   ============================================================ */
+async function loadPalette() {
+  let catalog;
+  try {
+    const r = await fetch('/api/nodes');
+    catalog = await r.json();
+  } catch {
+    document.getElementById('palette-list').innerHTML =
+      '<div class="palette-status">⚠ Could not load nodes</div>';
+    return;
+  }
+
+  const list = document.getElementById('palette-list');
+  list.innerHTML = '';
+
+  // Store nodes flat for search
+  window._allNodes = [];
+
+  for (const [provider, modules] of Object.entries(catalog)) {
+    const grpEl = document.createElement('div');
+    grpEl.className = 'provider-group';
+    grpEl.dataset.provider = provider;
+
+    const hdr = document.createElement('div');
+    hdr.className = 'provider-header';
+    hdr.innerHTML = `<span class="chevron">▶</span>${provider.toUpperCase()}`;
+    hdr.addEventListener('click', () => toggleSection(hdr, modsEl));
+
+    const modsEl = document.createElement('div');
+    modsEl.className = 'provider-modules';
+
+    for (const [module, nodes] of Object.entries(modules)) {
+      const modHdr = document.createElement('div');
+      modHdr.className = 'module-header';
+      modHdr.innerHTML = `<span class="chevron">▶</span>${module}`;
+
+      const modNodes = document.createElement('div');
+      modNodes.className = 'module-nodes';
+
+      const grid = document.createElement('div');
+      grid.className = 'node-grid';
+
+      modHdr.addEventListener('click', () => toggleSection(modHdr, modNodes));
+
+      for (const node of nodes) {
+        const el = makePaletteNode(node);
+        grid.appendChild(el);
+        window._allNodes.push({ node, el, provider, module });
+      }
+
+      modNodes.appendChild(grid);
+      modsEl.appendChild(modHdr);
+      modsEl.appendChild(modNodes);
+    }
+
+    grpEl.appendChild(hdr);
+    grpEl.appendChild(modsEl);
+    list.appendChild(grpEl);
+  }
+}
+
+function toggleSection(header, content) {
+  const open = content.classList.toggle('open');
+  header.classList.toggle('open', open);
+}
+
+function makePaletteNode(node) {
+  const el = document.createElement('div');
+  el.className = 'palette-node';
+  el.draggable = true;
+  el.title = node.name;
+  el.dataset.type = node.type;
+  el.dataset.icon = `/api/icons/${node.icon}`;
+  el.dataset.name = node.name;
+
+  const img = document.createElement('img');
+  img.src = `/api/icons/${node.icon}`;
+  img.alt = node.name;
+  img.loading = 'lazy';
+
+  const label = document.createElement('span');
+  label.textContent = node.name;
+
+  el.appendChild(img);
+  el.appendChild(label);
+
+  el.addEventListener('dragstart', e => {
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/x-node-type', node.type);
+    e.dataTransfer.setData('text/x-node-icon', `/api/icons/${node.icon}`);
+    e.dataTransfer.setData('text/x-node-name', node.name);
+  });
+
+  return el;
+}
+
+/* ── Search ── */
+document.getElementById('palette-search').addEventListener('input', function () {
+  const q = this.value.trim().toLowerCase();
+  if (!window._allNodes) return;
+
+  if (!q) {
+    // Reset: show everything, collapse all sections
+    document.querySelectorAll('.palette-node, .module-header, .provider-group').forEach(el => el.style.display = '');
+    document.querySelectorAll('.module-nodes').forEach(el => { el.style.display = ''; el.classList.remove('open'); });
+    document.querySelectorAll('.provider-modules').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.provider-header').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.module-header').forEach(el => el.classList.remove('open'));
+    return;
+  }
+
+  // Show/hide individual nodes
+  window._allNodes.forEach(({ node, el }) => {
+    const match = node.name.toLowerCase().includes(q) || node.type.toLowerCase().includes(q);
+    el.style.display = match ? '' : 'none';
+  });
+
+  // Hide module sections with no visible nodes; expand those with matches
+  document.querySelectorAll('.module-nodes').forEach(modNodes => {
+    const hasVisible = Array.from(modNodes.querySelectorAll('.palette-node'))
+      .some(n => n.style.display !== 'none');
+    modNodes.style.display       = hasVisible ? 'block' : 'none';
+    modNodes.previousElementSibling.style.display = hasVisible ? '' : 'none';
+  });
+
+  // Hide provider groups with no visible modules
+  document.querySelectorAll('.provider-group').forEach(grp => {
+    const hasVisible = Array.from(grp.querySelectorAll('.palette-node'))
+      .some(n => n.style.display !== 'none');
+    grp.style.display = hasVisible ? '' : 'none';
+  });
+});
+
+/* ============================================================
+   Canvas drop
+   ============================================================ */
+function onCanvasDrop(e) {
+  e.preventDefault();
+  document.getElementById('canvas-wrap').classList.remove('drag-over');
+
+  const type = e.dataTransfer.getData('text/x-node-type');
+  const icon = e.dataTransfer.getData('text/x-node-icon');
+  const name = e.dataTransfer.getData('text/x-node-name');
+  if (!type) return;
+
+  const container = cy.container();
+  const rect = container.getBoundingClientRect();
+  const zoom = cy.zoom();
+  const pan  = cy.pan();
+  const x = (e.clientX - rect.left - pan.x) / zoom;
+  const y = (e.clientY - rect.top  - pan.y) / zoom;
+
+  pushHistory();
+  cy.add({
+    group: 'nodes',
+    data: {
+      id:          uid(),
+      label:       name,
+      type:        type,
+      icon:        icon,
+      borderColor: providerColor(type),
+    },
+    position: { x, y },
+  });
+  updateCode();
+}
+
+/* ============================================================
+   Toolbar actions
+   ============================================================ */
+function newDiagram() {
+  if (cy.elements().length > 0 && !confirm('Clear the canvas?')) return;
+  cy.elements().remove();
+  document.getElementById('inp-name').value = 'My Diagram';
+  document.getElementById('sel-direction').value = 'LR';
+  document.getElementById('sel-theme').value = 'neutral';
+  updateCode();
+}
+
+function addCluster() {
+  const label = prompt('Cluster label:', 'My Cluster');
+  if (!label) return;
+  pushHistory();
+  const center = cy.extent();
+  cy.add({
+    group: 'nodes',
+    classes: 'cluster',
+    data: {
+      id:        uid(),
+      label:     label,
+      isCluster: true,
+    },
+    position: {
+      x: (center.x1 + center.x2) / 2,
+      y: (center.y1 + center.y2) / 2,
+    },
+  });
+  updateCode();
+}
+
+const HINT_DEFAULT = 'Drag nodes from the palette · <b>E</b> to draw edges · <kbd>Del</kbd> to delete · Double-click to rename · <kbd>Ctrl+Z</kbd> to undo';
+
+function setHint(html) {
+  document.getElementById('canvas-hint').innerHTML = html;
+}
+
+function enableDrawMode() {
+  drawMode = true;
+  drawSrc = null;
+  document.getElementById('btn-draw').classList.add('active');
+  document.getElementById('btn-draw').textContent = '✏️ Drawing…';
+  cy.userPanningEnabled(false);
+  setHint('Click a <b>source</b> node to start an edge · <b>Esc</b> to cancel');
+}
+
+function disableDrawMode() {
+  drawMode = false;
+  drawSrc = null;
+  cy.$('.draw-source').removeClass('draw-source');
+  document.getElementById('btn-draw').classList.remove('active');
+  document.getElementById('btn-draw').textContent = '✏️ Draw Edge';
+  cy.userPanningEnabled(true);
+  setHint(HINT_DEFAULT);
+}
+
+function toggleDrawMode() {
+  if (drawMode) disableDrawMode(); else enableDrawMode();
+}
+
+/* Return icon URL for a node type by looking up the loaded palette */
+function _lookupIcon(type) {
+  if (!window._allNodes) return '';
+  const e = window._allNodes.find(n => n.node.type === type);
+  return e ? `/api/icons/${e.node.icon}` : '';
+}
+
+/* Compact, token-efficient format for saving to disk (v:2).
+   Strips derived fields (icon, borderColor) and flattens positions. */
+function toSaveState() {
+  const nodes = [], edges = [];
+  cy.elements().forEach(el => {
+    if (el.isNode()) {
+      const d = el.data(), pos = el.position();
+      const n = { id: d.id, label: d.label };
+      if (d.isCluster) n.cluster = true;
+      else n.type = d.type;
+      if (d.parent) n.parent = d.parent;
+      n.x = Math.round(pos.x);
+      n.y = Math.round(pos.y);
+      nodes.push(n);
+    } else {
+      const d = el.data();
+      const e = { id: d.id, src: d.source, tgt: d.target };
+      if (d.label) e.label = d.label;
+      edges.push(e);
+    }
+  });
+  const state = {
+    v: 2,
+    name: document.getElementById('inp-name').value,
+    dir:  document.getElementById('sel-direction').value,
+    nodes, edges,
+  };
+  const theme = document.getElementById('sel-theme').value;
+  if (theme && theme !== 'neutral') state.theme = theme;
+  return state;
+}
+
+function saveJSON() {
+  const state = toSaveState();
+  const blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (state.name || 'diagram').replace(/\s+/g, '_') + '.json';
+  a.click();
+}
+
+function loadJSON(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = evt => {
+    try {
+      const state = JSON.parse(evt.target.result);
+      restoreState(state);
+    } catch {
+      alert('Invalid JSON file.');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+async function importPy(e) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+
+  const code = await file.text();
+  const btn = document.getElementById('btn-import-py');
+  btn.textContent = '⏳ Importing…';
+  btn.disabled = true;
+
+  try {
+    const r = await fetch('/api/import', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ code }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      alert(`Import failed:\n\n${data.error || 'Unknown error'}`);
+      return;
+    }
+    restoreState(data, /* runLayout= */ true);
+  } catch (err) {
+    alert(`Import error: ${err}`);
+  } finally {
+    btn.textContent = '📥 Import .py';
+    btn.disabled = false;
+  }
+}
+
+async function copyCode() {
+  const text = document.getElementById('code-output').textContent;
+  await navigator.clipboard.writeText(text).catch(() => {});
+  const btn = document.getElementById('btn-copy');
+  btn.textContent = '✓ Copied!';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1800);
+}
+
+/* ============================================================
+   Preview
+   ============================================================ */
+async function openPreview() {
+  const modal = document.getElementById('preview-modal');
+  const content = document.getElementById('preview-content');
+  modal.classList.add('open');
+  content.innerHTML = '<div id="preview-spinner">⏳ Rendering diagram…</div>';
+
+  const code = document.getElementById('code-output').textContent;
+  try {
+    const r = await fetch('/api/render', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, format: 'png' }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      content.innerHTML = `<pre style="color:#e53e3e;max-width:600px;white-space:pre-wrap">${escHtml(err.error || 'Render failed')}</pre>`;
+      return;
+    }
+    const blob = await r.blob();
+    const url  = URL.createObjectURL(blob);
+    content.innerHTML = `<img src="${url}" alt="Diagram preview">`;
+  } catch (err) {
+    content.innerHTML = `<pre style="color:#e53e3e">${escHtml(String(err))}</pre>`;
+  }
+}
+
+function closePreview() {
+  document.getElementById('preview-modal').classList.remove('open');
+  document.getElementById('preview-content').innerHTML = '';
+}
+
+document.getElementById('preview-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('preview-modal')) closePreview();
+});
+
+/* ============================================================
+   Inline label editing
+   ============================================================ */
+function onNodeDblTap(evt) {
+  const node = evt.target;
+  startInlineEdit(node);
+}
+
+function onEdgeDblTap(evt) {
+  const edge = evt.target;
+  const label = prompt('Edge label:', edge.data('label') || '');
+  if (label !== null) { pushHistory(); edge.data('label', label); updateCode(); }
+}
+
+function startInlineEdit(node) {
+  const input = document.getElementById('inline-input');
+  const pos   = node.renderedBoundingBox();
+  input.value = node.data('label');
+  input.style.display  = 'block';
+  input.style.left     = `${pos.x1}px`;
+  input.style.top      = `${pos.y2 + 4}px`;
+  input.style.minWidth = `${Math.max(80, pos.w)}px`;
+  input.focus();
+  input.select();
+
+  function commit() {
+    const newLabel = input.value || node.data('label');
+    if (newLabel !== node.data('label')) pushHistory();
+    node.data('label', newLabel);
+    input.style.display = 'none';
+    updateCode();
+  }
+  input.onblur   = commit;
+  input.onkeydown = e => {
+    if (e.key === 'Enter')  commit();
+    if (e.key === 'Escape') { input.style.display = 'none'; }
+    e.stopPropagation();
+  };
+}
+
+/* ============================================================
+   Context menu
+   ============================================================ */
+function onCtxTap(evt) {
+  evt.preventDefault();
+  ctxTarget = evt.target;
+  const menu = document.getElementById('ctx-menu');
+  const { x, y } = evt.originalEvent;
+  menu.style.left = `${x}px`;
+  menu.style.top  = `${y}px`;
+  menu.style.display = 'block';
+
+  const isCluster = ctxTarget.hasClass && ctxTarget.hasClass('cluster');
+  document.getElementById('ctx-rename').style.display = '';
+  document.getElementById('ctx-to-cluster').style.display   = isCluster ? 'none' : '';
+  document.getElementById('ctx-from-cluster').style.display =
+    (!isCluster && ctxTarget.isNode && ctxTarget.isNode() && ctxTarget.data('parent')) ? '' : 'none';
+}
+
+function hideCtxMenu() {
+  document.getElementById('ctx-menu').style.display = 'none';
+}
+
+/* ============================================================
+   Keyboard
+   ============================================================ */
+function onKeyDown(e) {
+  if (e.target.matches('input, textarea, select')) return;
+
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (cy.$(':selected').length) pushHistory();
+    cy.$(':selected').remove();
+    updateCode();
+    return;
+  }
+  if (e.key === 'Escape') {
+    if (drawMode) disableDrawMode();
+    closePreview();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+    cy.elements().select();
+    e.preventDefault();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    e.preventDefault();
+    undo();
+  }
+}
+
+/* ============================================================
+   State get / restore
+   ============================================================ */
+function getState() {
+  const elements = cy.elements().map(el => {
+    const json = el.json();
+    // Strip style/scratch, keep data + position
+    return {
+      group:    json.group,
+      data:     json.data,
+      position: json.position,
+      classes:  json.classes,
+    };
+  });
+  return {
+    name:      document.getElementById('inp-name').value,
+    direction: document.getElementById('sel-direction').value,
+    theme:     document.getElementById('sel-theme').value,
+    elements,
+  };
+}
+
+function restoreState(state, runLayout = false) {
+  cy.elements().remove();
+
+  const elements = [];
+  for (const n of (state.nodes || [])) {
+    const data = { id: n.id, label: n.label };
+    if (n.cluster) {
+      data.isCluster = true;
+    } else {
+      data.type = n.type;
+      data.icon = _lookupIcon(n.type);
+      data.borderColor = providerColor(n.type);
+    }
+    if (n.parent) data.parent = n.parent;
+    elements.push({
+      group: 'nodes',
+      data,
+      position: { x: n.x || 0, y: n.y || 0 },
+      classes: n.cluster ? 'cluster' : '',
+    });
+  }
+  for (const e of (state.edges || [])) {
+    elements.push({
+      group: 'edges',
+      data: { id: e.id, source: e.src, target: e.tgt, label: e.label || '' },
+    });
+  }
+
+  if (elements.length) cy.add(elements);
+
+  document.getElementById('inp-name').value      = state.name  || 'My Diagram';
+  document.getElementById('sel-direction').value = state.dir   || 'LR';
+  document.getElementById('sel-theme').value     = state.theme || 'neutral';
+
+  if (runLayout && cy.nodes().length > 0) {
+    cy.layout({
+      name: 'cose',
+      padding: 60,
+      nodeRepulsion: () => 12000,
+      idealEdgeLength: () => 120,
+      animate: true,
+      animationDuration: 500,
+      fit: true,
+      randomize: false,
+    }).run();
+  } else {
+    cy.fit(undefined, 40);
+  }
+  updateCode();
+}
+
+/* ============================================================
+   Code generation (via backend)
+   ============================================================ */
+async function updateCode() {
+  const state = getState();
+  let code = '';
+  try {
+    const r = await fetch('/api/generate', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(state),
+    });
+    const data = await r.json();
+    code = data.code || data.error || '';
+  } catch (err) {
+    code = `# Error generating code: ${err}`;
+  }
+  renderCode(code);
+}
+
+/* Minimal syntax highlighting */
+function renderCode(code) {
+  const el = document.getElementById('code-output');
+  el.innerHTML = escHtml(code)
+    .replace(/\b(from|import|with|as|def|class|return|if|else|elif|for|in|not|and|or|True|False|None)\b/g,
+      '<span class="kw">$1</span>')
+    .replace(/(#[^\n]*)/g, '<span class="cm">$1</span>')
+    .replace(/(&quot;[^&]*?&quot;|&#39;[^&]*?&#39;)/g, '<span class="st">$1</span>');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* ============================================================
+   Utilities
+   ============================================================ */
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+/* ============================================================
+   Boot
+   ============================================================ */
+window.addEventListener('DOMContentLoaded', async () => {
+  try {
+    initCy();
+  } catch (err) {
+    console.error('Canvas init error:', err);
+    document.getElementById('canvas-wrap').innerHTML =
+      `<div style="padding:20px;color:#e53e3e">Canvas error: ${escHtml(String(err))}</div>`;
+  }
+  await loadPalette();
+  updateCode();
+});
+</script>
+</body>
+</html>

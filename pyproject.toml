@@ -16,6 +16,9 @@ dependencies = [
     "typed-ast>=1.5.5,<2 ; python_version<'3.8'",
 ]
 
+[project.optional-dependencies]
+editor = ["flask>=2.0"]
+
 [project.scripts]
 diagrams = "diagrams.cli:main"
 

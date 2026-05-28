@@ -1,0 +1,64 @@
+{
+  "name": "My Diagram",
+  "direction": "LR",
+  "theme": "neutral",
+  "elements": [
+    {
+      "group": "nodes",
+      "data": {
+        "id": "id1",
+        "label": "AmazonOpensearchService",
+        "type": "aws.analytics.AmazonOpensearchService",
+        "icon": "/api/icons/aws/analytics/amazon-opensearch-service.png",
+        "borderColor": "#FF9900"
+      },
+      "position": {
+        "x": 562,
+        "y": 242
+      },
+      "classes": ""
+    },
+    {
+      "group": "nodes",
+      "data": {
+        "id": "id2",
+        "label": "EMR",
+        "type": "aws.analytics.EMR",
+        "icon": "/api/icons/aws/analytics/emr.png",
+        "borderColor": "#FF9900"
+      },
+      "position": {
+        "x": 747,
+        "y": 155
+      },
+      "classes": ""
+    },
+    {
+      "group": "edges",
+      "data": {
+        "id": "id3",
+        "source": "id1",
+        "target": "id2",
+        "label": ""
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "classes": ""
+    },
+    {
+      "group": "nodes",
+      "data": {
+        "id": "id4",
+        "label": "Prova",
+        "isCluster": true
+      },
+      "position": {
+        "x": 534,
+        "y": 129
+      },
+      "classes": "cluster"
+    }
+  ]
+}
