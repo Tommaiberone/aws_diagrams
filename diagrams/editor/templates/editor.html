@@ -761,14 +761,21 @@ function initCy() {
     if (e.key === 'e' && !e.target.matches('input,textarea')) toggleDrawMode();
   });
 
-  /* ── Drag-drop from palette ── */
+  /* ── Drag-drop from palette or .py file ── */
   const canvasWrap = document.getElementById('canvas-wrap');
   canvasWrap.addEventListener('dragover', e => {
     e.preventDefault();
+    // During dragover the browser doesn't expose filenames for security reasons;
+    // check only whether a file (any kind) is being dragged.
+    const isFileDrag = [...(e.dataTransfer.items || [])].some(i => i.kind === 'file');
     canvasWrap.classList.add('drag-over');
+    setHint(isFileDrag ? 'Drop to import <b>.py</b>' : HINT_DEFAULT);
   });
-  canvasWrap.addEventListener('dragleave', () => {
-    canvasWrap.classList.remove('drag-over');
+  canvasWrap.addEventListener('dragleave', e => {
+    if (!canvasWrap.contains(e.relatedTarget)) {
+      canvasWrap.classList.remove('drag-over');
+      setHint(HINT_DEFAULT);
+    }
   });
   canvasWrap.addEventListener('drop', onCanvasDrop);
 
@@ -992,6 +999,11 @@ document.getElementById('palette-search').addEventListener('input', function () 
 function onCanvasDrop(e) {
   e.preventDefault();
   document.getElementById('canvas-wrap').classList.remove('drag-over');
+  setHint(HINT_DEFAULT);
+
+  // .py file dragged from the OS file manager
+  const pyFile = [...(e.dataTransfer.files || [])].find(f => f.name.endsWith('.py'));
+  if (pyFile) { importPyFile(pyFile); return; }
 
   const type = e.dataTransfer.getData('text/x-node-type');
   const icon = e.dataTransfer.getData('text/x-node-icon');
@@ -1286,7 +1298,10 @@ async function importPy(e) {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
+  await importPyFile(file);
+}
 
+async function importPyFile(file) {
   const code = await file.text();
   const btn = document.getElementById('btn-import-py');
   btn.textContent = '⏳ Importing…';
