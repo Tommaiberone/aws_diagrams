@@ -506,7 +506,7 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
   <div id="canvas-wrap">
     <div id="cy"></div>
     <canvas id="edge-overlay"></canvas>
-    <div id="canvas-hint">Drag nodes from the palette · <b>E</b> to draw edges · <kbd>Del</kbd> to delete · Double-click to rename · <kbd>Ctrl+Z</kbd> to undo</div>
+    <div id="canvas-hint">Drag nodes from the palette · <b>E</b> draw edge · <kbd>Del</kbd> delete · Double-click to edit · <kbd>Ctrl+Z</kbd> undo</div>
     <input id="inline-input" type="text">
   </div>
 
@@ -682,7 +682,11 @@ function initCy() {
           'color':                  '#718096',
           'text-background-opacity': 1,
           'text-background-color':  '#fafbfc',
-          'text-background-padding': 2,
+          'text-background-padding': 3,
+          'text-border-width':       1,
+          'text-border-color':       '#cbd5e0',
+          'text-border-style':       'solid',
+          'text-border-opacity':     1,
         },
       },
       {
@@ -786,6 +790,7 @@ function initCy() {
   document.getElementById('ctx-rename').addEventListener('click', () => {
     hideCtxMenu();
     if (ctxTarget && ctxTarget.isNode()) startInlineEdit(ctxTarget);
+    else if (ctxTarget && ctxTarget.isEdge()) startEdgeLabelEdit(ctxTarget);
   });
   document.getElementById('ctx-delete').addEventListener('click', () => {
     hideCtxMenu();
@@ -1049,7 +1054,8 @@ function addCluster() {
   updateCode();
 }
 
-const HINT_DEFAULT = 'Drag nodes from the palette · <b>E</b> to draw edges · <kbd>Del</kbd> to delete · Double-click to rename · <kbd>Ctrl+Z</kbd> to undo';
+
+const HINT_DEFAULT = 'Drag nodes from the palette · <b>E</b> draw edge · <kbd>Del</kbd> delete · Double-click to edit · <kbd>Ctrl+Z</kbd> undo';
 
 function setHint(html) {
   document.getElementById('canvas-hint').innerHTML = html;
@@ -1406,14 +1412,42 @@ function onNodeDblTap(evt) {
 }
 
 function onEdgeDblTap(evt) {
-  const edge = evt.target;
-  const label = prompt('Edge label:', edge.data('label') || '');
-  if (label !== null) { pushHistory(); edge.data('label', label); updateCode(); }
+  startEdgeLabelEdit(evt.target);
+}
+
+function startEdgeLabelEdit(edge) {
+  const input = document.getElementById('inline-input');
+  const mid   = edge.midpoint();
+  const pan   = cy.pan();
+  const zoom  = cy.zoom();
+  const rx    = mid.x * zoom + pan.x;
+  const ry    = mid.y * zoom + pan.y;
+  input.value = edge.data('label') || '';
+  input.style.display  = 'block';
+  input.style.left     = `${rx - 40}px`;
+  input.style.top      = `${ry - 10}px`;
+  input.style.minWidth = '80px';
+  input.focus();
+  input.select();
+
+  function commit() {
+    const val = input.value;
+    if (val !== edge.data('label')) pushHistory();
+    edge.data('label', val);
+    input.style.display = 'none';
+    updateCode();
+  }
+  input.onblur    = commit;
+  input.onkeydown = e => {
+    if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { input.style.display = 'none'; }
+    e.stopPropagation();
+  };
 }
 
 function startInlineEdit(node) {
   const input = document.getElementById('inline-input');
-  const pos   = node.renderedBoundingBox();
+  const pos   = node.renderedBoundingBox({ includeLabels: false });
   input.value = node.data('label');
   input.style.display  = 'block';
   input.style.left     = `${pos.x1}px`;
