@@ -30,6 +30,18 @@ def run() -> int:
     return 0
 
 
+def _run_files(paths: list) -> None:
+    import diagrams as _d
+    _orig = _d.Diagram.__init__
+    def _patched(self, *a, **kw):
+        kw["show"] = False
+        _orig(self, *a, **kw)
+    _d.Diagram.__init__ = _patched
+    for path in paths:
+        with open(path, encoding="utf-8") as f:
+            exec(f.read())  # noqa: S102
+
+
 def _run_editor(args) -> None:
     from diagrams.editor import launch
     launch(port=args.port, open_browser=not args.no_browser)
@@ -88,15 +100,11 @@ def main():
     elif args.command == "export":
         _run_export(args)
     elif args.command == "run":
-        for path in args.paths:
-            with open(path, encoding="utf-8") as f:
-                exec(f.read())  # noqa: S102
+        _run_files(args.paths)
     else:
         # Backwards-compatible: bare `diagrams file.py` still works
         if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
-            for path in sys.argv[1:]:
-                with open(path, encoding="utf-8") as f:
-                    exec(f.read())  # noqa: S102
+            _run_files(sys.argv[1:])
         else:
             parser.print_help()
             sys.exit(1)

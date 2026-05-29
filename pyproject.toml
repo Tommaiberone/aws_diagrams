@@ -3,29 +3,30 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "diagrams"
-version = "0.25.1"
-description = "Diagram as Code"
-authors = [{ name = "mingrammer", email = "mingrammer@gmail.com" }]
+name = "diagrams-editor"
+version = "0.27.0"
+description = "Diagram as Code — with interactive web editor and headless PNG export"
+authors = [
+    { name = "mingrammer", email = "mingrammer@gmail.com" },
+    { name = "Tommaso Bersani", email = "tommasobersani@gmail.com" },
+]
 requires-python = "~=3.9"
 readme = "README.md"
 license = "MIT"
 dependencies = [
     "graphviz>=0.13.2,<0.22.0",
     "jinja2>=2.10,<4.0",
+    "flask>=2.0",
+    "pillow>=10.0",
     "typed-ast>=1.5.5,<2 ; python_version<'3.8'",
 ]
-
-[project.optional-dependencies]
-editor     = ["flask>=2.0"]
-screenshot = ["flask>=2.0", "playwright>=1.44"]
 
 [project.scripts]
 diagrams = "diagrams.cli:main"
 
 [project.urls]
-Homepage = "https://diagrams.mingrammer.com"
-Repository = "https://github.com/mingrammer/diagrams"
+Homepage = "https://github.com/tommasobersani/diagrams-editor"
+Repository = "https://github.com/tommasobersani/diagrams-editor"
 
 [dependency-groups]
 dev = [

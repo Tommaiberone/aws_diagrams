@@ -12,9 +12,9 @@ Generate architecture diagrams using the [diagrams](https://diagrams.mingrammer.
 
 | Dependency | Check command | Install |
 |---|---|---|
-| Python | `python --version` | — |
+| uv | `uv --version` | [docs.astral.sh/uv](https://docs.astral.sh/uv/) |
 | Graphviz | `dot -V` | `choco install graphviz` / `sudo apt-get install graphviz` |
-| diagrams + editor | `python -c "import diagrams"` | `pip install "diagrams[editor]"` |
+| diagrams-editor | `uv run python -c "import diagrams"` | `uv add diagrams-editor` |
 
 If any dependency is missing, tell the user what to install before proceeding. Do not attempt to install dependencies automatically.
 
@@ -132,41 +132,25 @@ The user can now open **http://localhost:8888** in their browser to:
 
 ### Step 5 — Export the PNG
 
-Export the diagram as a PNG using the `diagrams export` command. It spins up a
-temporary headless Chromium browser, renders the canvas (including edge-bridge
-overlays) at 2× resolution, and saves the PNG — no human interaction required.
-
-**One-time setup** (only needed once per environment):
+Export the diagram as a PNG using the `diagrams export` command. It uses a
+pure-Python renderer (Pillow) — no browser, no Graphviz, no extra dependencies.
 
 ```bash
-pip install playwright
-playwright install chromium
-```
-
-**Export:**
-
-```bash
-diagrams export docs/architecture/<diagram-name>.py docs/architecture/<diagram-name>.png
+uv run diagrams export docs/architecture/<diagram-name>.py docs/architecture/<diagram-name>.png
 ```
 
 Optional flags:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--width` / `--height` | 1600 × 900 | Browser viewport size |
-| `--scale` | 2 | Output resolution multiplier |
-| `--port` | auto | Internal server port |
-
-The output is pixel-identical to clicking **⬇ Export PNG** in the browser UI.
+| `--scale` | 2 | Output resolution multiplier (2 = retina quality) |
 
 #### Troubleshooting
 
 | Error | Fix |
 |---|---|
-| `ModuleNotFoundError: No module named 'playwright'` | `pip install playwright && playwright install chromium` |
-| `ModuleNotFoundError: No module named 'diagrams'` | `pip install "diagrams[screenshot]"` |
-| `ImportError: cannot import name 'X'` | Wrong module path — validate with `python -c "from diagrams.aws.Y import X"` |
-| Port conflict | Pass `--port 8889` (or any free port) |
+| `ModuleNotFoundError: No module named 'diagrams'` | `uv add diagrams-editor` |
+| `ImportError: cannot import name 'X'` | Wrong module path — validate with `uv run python -c "from diagrams.aws.Y import X"` |
 
 ### Step 6 — Report output
 
