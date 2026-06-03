@@ -226,9 +226,7 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
   text-align: center;
   line-height: 1.2;
   max-width: 60px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
   display: block;
 }
 .palette-node:hover span { color: var(--sidebar-text); }
@@ -574,8 +572,8 @@ function initCy() {
           'text-valign':            'bottom',
           'text-halign':            'center',
           'text-margin-y':          4,
-          'text-max-width':         80,
-          'text-wrap':              'ellipsis',
+          'text-max-width':         120,
+          'text-wrap':              'wrap',
           'padding':                6,
         },
       },
@@ -909,7 +907,7 @@ document.getElementById('palette-search').addEventListener('input', function () 
     // Reset: show everything, collapse all sections
     document.querySelectorAll('.palette-node, .module-header, .provider-group').forEach(el => el.style.display = '');
     document.querySelectorAll('.module-nodes').forEach(el => { el.style.display = ''; el.classList.remove('open'); });
-    document.querySelectorAll('.provider-modules').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.provider-modules').forEach(el => { el.style.display = ''; el.classList.remove('open'); });
     document.querySelectorAll('.provider-header').forEach(el => el.classList.remove('open'));
     document.querySelectorAll('.module-header').forEach(el => el.classList.remove('open'));
     return;
@@ -921,19 +919,25 @@ document.getElementById('palette-search').addEventListener('input', function () 
     el.style.display = match ? '' : 'none';
   });
 
-  // Hide module sections with no visible nodes; expand those with matches
+  // Expand/collapse module sections based on matches
   document.querySelectorAll('.module-nodes').forEach(modNodes => {
     const hasVisible = Array.from(modNodes.querySelectorAll('.palette-node'))
       .some(n => n.style.display !== 'none');
-    modNodes.style.display       = hasVisible ? 'block' : 'none';
-    modNodes.previousElementSibling.style.display = hasVisible ? '' : 'none';
+    modNodes.style.display = hasVisible ? 'block' : 'none';
+    const modHeader = modNodes.previousElementSibling;
+    modHeader.style.display = hasVisible ? '' : 'none';
+    modHeader.classList.toggle('open', hasVisible);
   });
 
-  // Hide provider groups with no visible modules
+  // Expand/collapse provider groups and their module containers
   document.querySelectorAll('.provider-group').forEach(grp => {
     const hasVisible = Array.from(grp.querySelectorAll('.palette-node'))
       .some(n => n.style.display !== 'none');
     grp.style.display = hasVisible ? '' : 'none';
+    const provModules = grp.querySelector('.provider-modules');
+    const provHeader  = grp.querySelector('.provider-header');
+    if (provModules) provModules.style.display = hasVisible ? 'block' : 'none';
+    if (provHeader)  provHeader.classList.toggle('open', hasVisible);
   });
 });
 
