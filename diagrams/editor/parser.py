@@ -110,10 +110,13 @@ class _DiagramVisitor(ast.NodeVisitor):
             if name in ("Cluster", "Group"):
                 cl_id = self._uid()
                 label = _str_arg(item.context_expr, 0) or "Cluster"
+                cl_data: dict = {"id": cl_id, "label": label, "isCluster": True}
+                if self._cluster_stack:
+                    cl_data["parent"] = self._cluster_stack[-1]
                 self.elements.append({
                     "group":   "nodes",
                     "classes": "cluster",
-                    "data":    {"id": cl_id, "label": label, "isCluster": True},
+                    "data":    cl_data,
                     "position": {"x": 0, "y": 0},
                 })
                 self._cluster_stack.append(cl_id)
@@ -251,24 +254,16 @@ class _DiagramVisitor(ast.NodeVisitor):
 
 def _auto_layout(elements: list, direction: str = "LR"):
     """
-    Two-phase cluster-aware layered layout.
+    Hierarchical cluster-aware layered layout.
 
-    Phase 1 — topology:
-      BFS longest-path assigns each regular node a layer.
-      All children of a cluster are snapped to the cluster's max-layer child
-      so that every cluster occupies exactly one column.
-      Layer indices are then compacted (no empty columns).
-
-    Phase 2 — packing:
-      In each column, "units" (a whole cluster or a lone top-level node) are
-      stacked along the cross axis.  Unit sizes account for the number of
-      children and the cluster padding, so units never overlap.
-
-    Guarantee: because every cluster spans exactly one column, and within each
-    column units are packed with explicit size-aware gaps, no two clusters can
-    overlap — whether they share a column or not.
-    (Clusters in different columns differ in x by ≥ LAYER_GAP > NODE_SIZE +
-    2·CL_PAD, so their bounding boxes cannot overlap in x either.)
+    - Only *leaf* clusters (no nested cluster children) snap their members to
+      one column; outer clusters let each direct child keep its natural layer.
+      This preserves the topological flow direction even inside deep nesting
+      (e.g. IGW stays near Internet, TGW Attachment stays near TGW).
+    - Direct children of non-leaf clusters are placed as standalone nodes.
+    - After column packing, a family-alignment pass ensures every node that
+      belongs to the same root cluster shares the same cross-axis centre
+      across all layers, so the outer cluster box is symmetric and compact.
     """
     from collections import defaultdict, deque
 
@@ -299,6 +294,9 @@ def _auto_layout(elements: list, direction: str = "LR"):
                 adj_out[s].append(t)
                 in_deg[t] += 1
 
+    # Keep a copy of original in-degrees (BFS zeroes them out)
+    in_deg_orig: dict = dict(in_deg)
+
     # ── Topological BFS: longest-path layering ────────────────────────────────
     layer_of: dict = {nid: 0 for nid in reg_ids}
     queue = deque(nid for nid in reg_ids if in_deg[nid] == 0)
@@ -310,17 +308,87 @@ def _auto_layout(elements: list, direction: str = "LR"):
             if in_deg[tgt] == 0:
                 queue.append(tgt)
 
-    # ── Snap cluster children to one column (max layer of siblings) ───────────
+    # ── Pull "source-only" nodes toward their targets ─────────────────────────
+    # Nodes with no incoming edges default to layer 0 from BFS.  When their
+    # outgoing targets are much later (e.g. a monitoring node that observes
+    # services deep in the graph), layer 0 causes the node to extend its
+    # parent cluster's bounding box far to the left/top, overlapping unrelated
+    # elements.  Move such nodes to a layer near the average of their targets.
+    for nid in reg_ids:
+        if in_deg_orig.get(nid, 0) == 0 and adj_out[nid]:
+            tgt_layers = [layer_of[t] for t in adj_out[nid] if t in layer_of]
+            if tgt_layers:
+                avg = sum(tgt_layers) / len(tgt_layers)
+                if avg > layer_of[nid] + 2:
+                    layer_of[nid] = round(avg)
+
+    # ── Identify leaf clusters (no nested cluster children) ────────────────────
+    leaf_clusters: set = {
+        cl_id for cl_id in cluster_ids
+        if not any(all_nodes[cid]["data"].get("parent") == cl_id for cid in cluster_ids)
+    }
+
+    # ── Snap children of LEAF clusters (spread-limited) ───────────────────────
+    # A leaf cluster is snapped only when all *connected* members span ≤ 4
+    # layers.  Wide-spread clusters (e.g. a "services" cluster where one member
+    # is also a late-stage processor after an async pipeline) are left
+    # unsnapped so they don't create backwards edges.
+    _SNAP_SPREAD = 4
+
     cluster_children: dict = {}
+    snappable_leaf: set = set()
+
     for cl_id in cluster_ids:
         ch = [nid for nid in reg_ids if all_nodes[nid]["data"].get("parent") == cl_id]
         cluster_children[cl_id] = sorted(ch)
-        if ch:
-            target = max(layer_of[c] for c in ch)
+        if not ch or cl_id not in leaf_clusters:
+            continue
+        connected = [c for c in ch if in_deg_orig.get(c, 0) > 0 or adj_out[c]]
+        isolated  = [c for c in ch if c not in connected]
+        if connected:
+            max_l = max(layer_of[c] for c in connected)
+            min_l = min(layer_of[c] for c in connected)
+            spread = max_l - min_l
+        else:
+            max_l  = max(layer_of[c] for c in ch)
+            spread = 0
+        if spread <= _SNAP_SPREAD:
             for c in ch:
-                layer_of[c] = target
+                layer_of[c] = max_l
+            snappable_leaf.add(cl_id)
+        else:
+            # Snap isolated (edge-free) nodes to the median layer of connected ones
+            if isolated and connected:
+                mid = sorted(layer_of[c] for c in connected)[len(connected) // 2]
+                for c in isolated:
+                    layer_of[c] = mid
 
-    # ── Compact layer indices (remove empty columns) ───────────────────────────
+    # ── Post-snap propagation ─────────────────────────────────────────────────
+    # Snap moves cluster members to later layers.  Non-cluster nodes that
+    # receive edges from snapped members (e.g. S3 receiving from a CDN that
+    # was snapped forward) must be updated so they don't end up in the same
+    # column as the cluster they are NOT part of.
+    snapped_members: set = {
+        nid for cl_id in snappable_leaf for nid in cluster_children.get(cl_id, [])
+    }
+    adj_in: dict = defaultdict(list)
+    for s, targets in adj_out.items():
+        for t in targets:
+            adj_in[t].append(s)
+
+    relaxed = True
+    while relaxed:
+        relaxed = False
+        for nid in reg_ids:
+            if nid in snapped_members:
+                continue
+            for pred in adj_in.get(nid, []):
+                new_l = layer_of.get(pred, 0) + 1
+                if new_l > layer_of[nid]:
+                    layer_of[nid] = new_l
+                    relaxed = True
+
+    # ── Compact layer indices ─────────────────────────────────────────────────
     used   = sorted(set(layer_of.values()))
     remap  = {v: i for i, v in enumerate(used)}
     for nid in reg_ids:
@@ -328,40 +396,52 @@ def _auto_layout(elements: list, direction: str = "LR"):
     n_layers = len(used)
 
     # ── Build column → units ──────────────────────────────────────────────────
-    # unit = ("cluster", cl_id, [children]) | ("node", nid, [])
-    col_units: list   = [[] for _ in range(n_layers)]
-    placed_cl: set    = set()
+    col_units: list = [[] for _ in range(n_layers)]
+    placed_cl: set  = set()
 
     for cl_id, ch in cluster_children.items():
-        if ch:
-            col = layer_of[ch[0]]           # all children snapped to same layer
+        if ch and cl_id in snappable_leaf:
+            col = layer_of[ch[0]]
             col_units[col].append(("cluster", cl_id, ch))
             placed_cl.add(cl_id)
-    for cl_id in cluster_ids:              # empty clusters → column 0
-        if cl_id not in placed_cl:
-            col_units[0].append(("cluster", cl_id, []))
 
     for nid in reg_ids:
-        if not all_nodes[nid]["data"].get("parent"):
+        parent = all_nodes[nid]["data"].get("parent")
+        # Place as standalone when: no parent, parent is non-leaf cluster,
+        # or parent is a leaf cluster that was NOT snapped.
+        if (not parent
+                or (parent in cluster_ids and parent not in leaf_clusters)
+                or (parent in leaf_clusters and parent not in snappable_leaf)):
             col_units[layer_of[nid]].append(("node", nid, []))
 
     # ── Geometry constants ─────────────────────────────────────────────────────
-    NODE_SZ   = 80    # node icon diameter (matches CSS width/height: 56 + padding)
-    CHILD_GAP = 120   # gap between children within a cluster (cross axis)
-    CL_PAD    = 55    # matches CSS padding: 30 on the node + margin buffer
-    LAYER_GAP = 250   # distance between columns  (must be > NODE_SZ + 2·CL_PAD)
-    UNIT_GAP  = 70    # gap between units in the same column
-    MARGIN    = 130   # canvas margin
-    CROSS_CTR = 500   # cross-axis centre of the whole diagram
+    NODE_SZ    = 56    # node width/height — matches Cytoscape stylesheet `width: 56`
+    CHILD_GAP  = 120   # gap between siblings within a leaf cluster
+    CL_PAD     = 30    # cluster padding — matches Cytoscape stylesheet `padding: 30`
+    RENDER_PAD = 30    # extra padding per nesting level for cross_size computation
+    LAYER_GAP  = 250   # distance between layers
+    UNIT_GAP   = 70    # gap between sibling units in the same column
+    MARGIN     = 130   # canvas margin
+    CROSS_CTR  = 500   # cross-axis centre of the whole diagram
 
     vertical = direction in ("TB", "BT")
     reverse  = direction in ("RL", "BT")
 
-    def cross_size(kind: str, ch: list) -> float:
+    def cluster_depth(cl_id: str) -> int:
+        p = all_nodes[cl_id]["data"].get("parent")
+        return 1 + cluster_depth(p) if p and p in cluster_ids else 0
+
+    def node_depth(nid: str) -> int:
+        parent = all_nodes[nid]["data"].get("parent")
+        return 1 + cluster_depth(parent) if parent and parent in cluster_ids else 0
+
+    def cross_size(kind: str, uid: str, ch: list) -> float:
+        """Effective cross size including space reserved for each ancestor cluster box."""
         if kind == "node":
-            return NODE_SZ
+            return NODE_SZ + 2 * node_depth(uid) * RENDER_PAD
         n = len(ch)
-        return max(n - 1, 0) * CHILD_GAP + NODE_SZ + 2 * CL_PAD
+        base = max(n - 1, 0) * CHILD_GAP + NODE_SZ + 2 * CL_PAD
+        return base + 2 * cluster_depth(uid) * RENDER_PAD
 
     def set_pos(nid: str, lc: float, cc: float) -> None:
         if vertical:
@@ -377,15 +457,14 @@ def _auto_layout(elements: list, direction: str = "LR"):
         col_val = (n_layers - 1 - col_idx) if reverse else col_idx
         lc = MARGIN + col_val * LAYER_GAP
 
-        # Sort: clusters before lone nodes, then alphabetically for stability
         units.sort(key=lambda u: (0 if u[0] == "cluster" else 1, u[1]))
 
-        total = (sum(cross_size(k, ch) for k, _, ch in units)
-                 + UNIT_GAP * max(0, len(units) - 1))
+        total  = (sum(cross_size(k, uid, ch) for k, uid, ch in units)
+                  + UNIT_GAP * max(0, len(units) - 1))
         cursor = CROSS_CTR - total / 2.0
 
         for kind, uid, ch in units:
-            cs     = cross_size(kind, ch)
+            cs     = cross_size(kind, uid, ch)
             center = cursor + cs / 2.0
             cursor += cs + UNIT_GAP
 
@@ -397,6 +476,86 @@ def _auto_layout(elements: list, direction: str = "LR"):
                     cc = center - (n - 1) * CHILD_GAP / 2.0 + i * CHILD_GAP
                     set_pos(child_id, lc, cc)
                 set_pos(uid, lc, center)
+
+    # ── Family alignment ──────────────────────────────────────────────────────
+    # After independent column packing, nodes in the same root cluster may land
+    # at different cross positions across layers.  Shift each layer so that the
+    # family's cross centre is consistent (derived from its widest layer).
+
+    def root_family(nid: str):
+        cur, root = all_nodes[nid]["data"].get("parent"), None
+        while cur and cur in cluster_ids:
+            root = cur
+            cur  = all_nodes[cur]["data"].get("parent")
+        return root
+
+    def get_cc(nid: str) -> float:
+        p = all_nodes[nid]["position"]
+        return p["x"] if vertical else p["y"]
+
+    def set_cc(nid: str, val: float) -> None:
+        if vertical:
+            all_nodes[nid]["position"]["x"] = round(val)
+        else:
+            all_nodes[nid]["position"]["y"] = round(val)
+
+    family_layers: dict = defaultdict(lambda: defaultdict(list))
+    for nid in reg_ids:
+        fam = root_family(nid)
+        if fam:
+            family_layers[fam][layer_of[nid]].append(nid)
+
+    for fam_id, by_layer in family_layers.items():
+        # Reference = layer with the largest cross span (widest content)
+        ref_layer = max(
+            by_layer,
+            key=lambda l: (
+                max(get_cc(n) for n in by_layer[l]) - min(get_cc(n) for n in by_layer[l])
+                if len(by_layer[l]) > 1 else 0
+            ),
+        )
+        ref_center = sum(get_cc(n) for n in by_layer[ref_layer]) / len(by_layer[ref_layer])
+
+        for layer, nodes in by_layer.items():
+            if layer == ref_layer:
+                continue
+            cur_center = sum(get_cc(n) for n in nodes) / len(nodes)
+            offset = ref_center - cur_center
+            if abs(offset) < 0.5:
+                continue
+            for nid in nodes:
+                set_cc(nid, get_cc(nid) + offset)
+            # Also shift the leaf-cluster node that owns these reg nodes
+            shifted: set = set()
+            for nid in nodes:
+                parent = all_nodes[nid]["data"].get("parent")
+                if parent and parent in leaf_clusters and parent not in shifted:
+                    shifted.add(parent)
+                    set_cc(parent, get_cc(parent) + offset)
+
+    # ── Position outer clusters at centroid of descendants ────────────────────
+    def _desc_reg(cl_id: str) -> list:
+        result = [nid for nid in reg_ids if all_nodes[nid]["data"].get("parent") == cl_id]
+        for cid in cluster_ids:
+            if all_nodes[cid]["data"].get("parent") == cl_id:
+                result.extend(_desc_reg(cid))
+        return result
+
+    for cl_id in cluster_ids:
+        if cl_id not in placed_cl:
+            desc = _desc_reg(cl_id)
+            if desc:
+                xs_d = [all_nodes[d]["position"]["x"] for d in desc]
+                ys_d = [all_nodes[d]["position"]["y"] for d in desc]
+                all_nodes[cl_id]["position"] = {
+                    "x": round(sum(xs_d) / len(xs_d)),
+                    "y": round(sum(ys_d) / len(ys_d)),
+                }
+            else:
+                all_nodes[cl_id]["position"] = {
+                    "x": round(MARGIN),
+                    "y": round(CROSS_CTR) if not vertical else round(MARGIN),
+                }
 
 
 # ──────────────────────────────────────────────────────────────────────────────

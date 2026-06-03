@@ -1,24 +1,34 @@
 """Flask server powering the web-based diagram editor."""
-import os
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
+from typing import Optional
 
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, render_template, request, send_file
 
 _HERE = Path(__file__).parent
 _RESOURCES = Path(__file__).parent.parent.parent / "resources"
-_DIAGRAMS_ROOT = Path(__file__).parent.parent.parent
 
 
-def create_app() -> Flask:
+def create_app(initial_file: Optional[str] = None) -> Flask:
     app = Flask(__name__, template_folder=str(_HERE / "templates"))
+
+    _initial_code: Optional[str] = None
+    if initial_file:
+        p = Path(initial_file)
+        if p.exists():
+            _initial_code = p.read_text(encoding="utf-8")
+        else:
+            print(f"Warning: file not found: {initial_file}", file=sys.stderr)
 
     # ------------------------------------------------------------------ UI
     @app.route("/")
     def index():
         return render_template("editor.html")
+
+    # ------------------------------------------------------------------ Initial file
+    @app.route("/api/initial")
+    def api_initial():
+        return jsonify({"code": _initial_code})
 
     # ------------------------------------------------------------------ Nodes
     @app.route("/api/nodes")
@@ -97,51 +107,5 @@ def create_app() -> Flask:
             result["theme"] = theme
 
         return jsonify(result)
-
-    # ------------------------------------------------------------------ Render preview
-    @app.route("/api/render", methods=["POST"])
-    def api_render():
-        payload = request.get_json(force=True) or {}
-        code: str = payload.get("code", "")
-        fmt: str = payload.get("format", "png")
-
-        if not code.strip():
-            return jsonify({"error": "empty code"}), 400
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Monkey-patch Diagram so it writes to tmpdir with show=False
-            wrapper = (
-                f"import sys, os\n"
-                f"sys.path.insert(0, {str(_DIAGRAMS_ROOT)!r})\n"
-                f"os.chdir({tmpdir!r})\n"
-                f"import diagrams as _d\n"
-                f"_orig = _d.Diagram.__init__\n"
-                f"def _patched(self, *a, **kw):\n"
-                f"    kw['show'] = False\n"
-                f"    kw['outformat'] = {fmt!r}\n"
-                f"    _orig(self, *a, **kw)\n"
-                f"_d.Diagram.__init__ = _patched\n"
-                f"\n"
-                f"{code}\n"
-            )
-
-            result = subprocess.run(
-                [sys.executable, "-c", wrapper],
-                capture_output=True,
-                timeout=30,
-                cwd=tmpdir,
-            )
-
-            if result.returncode != 0:
-                err = result.stderr.decode(errors="replace")[:3000]
-                return jsonify({"error": err}), 400
-
-            for fname in os.listdir(tmpdir):
-                if fname.endswith(f".{fmt}"):
-                    img_bytes = (Path(tmpdir) / fname).read_bytes()
-                    mime = "image/png" if fmt == "png" else f"image/{fmt}"
-                    return Response(img_bytes, mimetype=mime)
-
-            return jsonify({"error": "diagram produced no output image"}), 500
 
     return app

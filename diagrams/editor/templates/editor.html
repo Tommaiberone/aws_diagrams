@@ -365,50 +365,6 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
 .cm  { color: #5c6370; font-style: italic; }
 .fn  { color: #61aeee; }
 
-/* ───────────────────────────── Preview Modal ───────────────────────────── */
-#preview-modal {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.6);
-  z-index: 1000;
-  align-items: center;
-  justify-content: center;
-}
-#preview-modal.open { display: flex; }
-
-#preview-box {
-  background: #fff;
-  border-radius: 10px;
-  max-width: 90vw;
-  max-height: 90vh;
-  overflow: auto;
-  padding: 20px;
-  position: relative;
-  box-shadow: 0 20px 60px rgba(0,0,0,.4);
-}
-
-#preview-box img {
-  display: block;
-  max-width: 100%;
-}
-
-#preview-close {
-  position: absolute;
-  top: 10px; right: 12px;
-  background: none;
-  border: none;
-  font-size: 20px;
-  cursor: pointer;
-  color: #718096;
-}
-#preview-close:hover { color: var(--danger); }
-
-#preview-spinner {
-  display: flex; align-items: center; justify-content: center;
-  min-width: 260px; min-height: 100px;
-  color: #718096; font-size: 13px; gap: 10px;
-}
 
 /* ───────────────────────────── Context Menu ───────────────────────────── */
 #ctx-menu {
@@ -489,7 +445,6 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
     <div class="toolbar-spacer"></div>
 
     <button class="btn" id="btn-export-png" title="Download canvas as PNG">⬇ Export PNG</button>
-    <button class="btn primary" id="btn-preview">▶ Preview</button>
   </div>
 
   <!-- ──────────────────────────── Palette ──────────────────────────── -->
@@ -522,15 +477,6 @@ body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text
   </div>
 </div>
 
-<!-- ──────────────────────────── Preview Modal ──────────────────────────── -->
-<div id="preview-modal">
-  <div id="preview-box">
-    <button id="preview-close" title="Close">✕</button>
-    <div id="preview-content">
-      <div id="preview-spinner">⏳ Rendering diagram…</div>
-    </div>
-  </div>
-</div>
 
 <!-- ──────────────────────────── Context Menu ──────────────────────────── -->
 <div id="ctx-menu">
@@ -789,9 +735,7 @@ function initCy() {
   document.getElementById('py-file-input').addEventListener('change', importPy);
   document.getElementById('btn-cluster').addEventListener('click', addCluster);
   document.getElementById('btn-export-png').addEventListener('click', exportPng);
-  document.getElementById('btn-preview').addEventListener('click', openPreview);
   document.getElementById('btn-copy').addEventListener('click', copyCode);
-  document.getElementById('preview-close').addEventListener('click', closePreview);
 
   /* ── Context menu actions ── */
   document.getElementById('ctx-rename').addEventListener('click', () => {
@@ -1380,43 +1324,6 @@ function exportPng() {
   img.src = cyDataUrl;
 }
 
-/* ============================================================
-   Preview
-   ============================================================ */
-async function openPreview() {
-  const modal = document.getElementById('preview-modal');
-  const content = document.getElementById('preview-content');
-  modal.classList.add('open');
-  content.innerHTML = '<div id="preview-spinner">⏳ Rendering diagram…</div>';
-
-  const code = document.getElementById('code-output').textContent;
-  try {
-    const r = await fetch('/api/render', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, format: 'png' }),
-    });
-    if (!r.ok) {
-      const err = await r.json();
-      content.innerHTML = `<pre style="color:#e53e3e;max-width:600px;white-space:pre-wrap">${escHtml(err.error || 'Render failed')}</pre>`;
-      return;
-    }
-    const blob = await r.blob();
-    const url  = URL.createObjectURL(blob);
-    content.innerHTML = `<img src="${url}" alt="Diagram preview">`;
-  } catch (err) {
-    content.innerHTML = `<pre style="color:#e53e3e">${escHtml(String(err))}</pre>`;
-  }
-}
-
-function closePreview() {
-  document.getElementById('preview-modal').classList.remove('open');
-  document.getElementById('preview-content').innerHTML = '';
-}
-
-document.getElementById('preview-modal').addEventListener('click', e => {
-  if (e.target === document.getElementById('preview-modal')) closePreview();
-});
 
 /* ============================================================
    Inline label editing
@@ -1528,7 +1435,6 @@ function onKeyDown(e) {
   }
   if (e.key === 'Escape') {
     if (drawMode) disableDrawMode();
-    closePreview();
   }
   if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
     cy.elements().select();
@@ -1653,6 +1559,24 @@ window.addEventListener('beforeunload', e => {
   e.returnValue = '';
 });
 
+async function checkInitialFile() {
+  try {
+    const r = await fetch('/api/initial');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data.code) return;
+    const ir = await fetch('/api/import', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ code: data.code }),
+    });
+    if (!ir.ok) return;
+    const state = await ir.json();
+    restoreState(state);
+    setDirty(false);
+  } catch {}
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   try {
     initCy();
@@ -1662,6 +1586,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       `<div style="padding:20px;color:#e53e3e">Canvas error: ${escHtml(String(err))}</div>`;
   }
   await loadPalette();
+  await checkInitialFile();
   updateCode();
 });
 </script>

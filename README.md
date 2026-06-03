@@ -6,7 +6,7 @@
 [![pypi version](https://badge.fury.io/py/diagrams-editor.svg)](https://badge.fury.io/py/diagrams-editor)
 ![python version](https://img.shields.io/badge/python-%3E%3D%203.9-blue?logo=python)
 
-Fork of [mingrammer/diagrams](https://github.com/mingrammer/diagrams) — **Diagram as Code** with an interactive web editor and headless PNG export included out of the box.
+Fork of [mingrammer/diagrams](https://github.com/mingrammer/diagrams) — **Diagram as Code** with an interactive web editor included out of the box.
 
 > **Note:** installs under the `diagrams` Python namespace and replaces the original `diagrams` package. Do not install both in the same virtualenv.
 
@@ -16,14 +16,18 @@ Fork of [mingrammer/diagrams](https://github.com/mingrammer/diagrams) — **Diag
 uv add diagrams-editor
 ```
 
-That's it. The web editor, the headless PNG export, and all dependencies come in one command.
+That's it. The web editor and all dependencies come in one command.
 
 ## Usage
 
 ### Open the web editor
 
 ```bash
+# Empty canvas
 uv run diagrams editor
+
+# Pre-load an existing .py file
+uv run diagrams editor architecture.py
 ```
 
 Opens **http://localhost:8888** in your browser. Drag nodes from the palette, draw edges, group into clusters — the Python code is generated live in the sidebar.
@@ -33,19 +37,11 @@ From there you can:
 - **💾 Save .py** — download the generated Python code (Ctrl+S)
 - **⬇ Export PNG** — download a screenshot of the canvas
 
-### Export PNG from the command line
-
-Useful for CI pipelines and AI agents — no browser needed.
-
-```bash
-uv run diagrams export architecture.py architecture.png
-```
-
 ### One-off, without adding to the project
 
 ```bash
-uv run --with diagrams-editor diagrams editor
-uv run --with diagrams-editor diagrams export architecture.py architecture.png
+uvx --from diagrams-editor diagrams editor
+uvx --from diagrams-editor diagrams editor architecture.py
 ```
 
 ### Write diagrams in Python

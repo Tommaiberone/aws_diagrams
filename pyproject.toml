@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "diagrams-editor"
-version = "0.28.0"
-description = "Diagram as Code — with interactive web editor and headless PNG export"
+version = "0.32.0"
+description = "Diagram as Code — with interactive web editor and Claude Code skill distribution"
 authors = [
     { name = "mingrammer", email = "mingrammer@gmail.com" },
     { name = "Tommaso Bersani", email = "tommasobersani@gmail.com" },
@@ -17,8 +17,6 @@ dependencies = [
     "graphviz>=0.13.2,<0.22.0",
     "jinja2>=2.10,<4.0",
     "flask>=2.0",
-    "pillow>=10.0",
-    "typed-ast>=1.5.5,<2 ; python_version<'3.8'",
 ]
 
 [project.scripts]

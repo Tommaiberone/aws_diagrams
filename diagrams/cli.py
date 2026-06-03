@@ -44,26 +44,34 @@ def _run_files(paths: list) -> None:
 
 def _run_editor(args) -> None:
     from diagrams.editor import launch
-    launch(port=args.port, open_browser=not args.no_browser)
-
-
-def _run_export(args) -> None:
-    from pathlib import Path
-    from diagrams.editor.screenshot import export_png
-
-    input_path  = Path(args.input)
-    output_path = Path(args.output) if args.output else input_path.with_suffix(".png")
-
-    print(f"Exporting {input_path} → {output_path} …")
-    export_png(
-        input_path.read_text(encoding="utf-8"),
-        output_path,
+    launch(
         port=args.port,
-        viewport_width=args.width,
-        viewport_height=args.height,
-        scale=args.scale,
+        open_browser=not args.no_browser,
+        initial_file=getattr(args, "file", None),
     )
-    print(f"Saved: {output_path}")
+
+
+def _run_skill_install(args) -> None:
+    from pathlib import Path
+
+    skill_src = Path(__file__).parent / "editor" / "SKILL.md"
+    if not skill_src.exists():
+        print("Error: SKILL.md not found in package.", file=sys.stderr)
+        sys.exit(1)
+
+    if getattr(args, "global_install", False):
+        dest_dir = Path.home() / ".claude" / "skills"
+    else:
+        dest_dir = Path.cwd() / ".claude" / "skills"
+
+    dest_dir = dest_dir / "python-diagrams"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "SKILL.md"
+    dest.write_text(skill_src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    scope = "globally (~/.claude/skills/python-diagrams/)" if getattr(args, "global_install", False) else f"in this project ({dest})"
+    print(f"Skill installed {scope}")
+    print("Restart Claude Code to activate it.")
 
 
 def main():
@@ -80,25 +88,24 @@ def main():
 
     # ── editor ──
     ed_p = sub.add_parser("editor", help="Launch the interactive web-based diagram editor")
+    ed_p.add_argument("file", nargs="?", default=None,
+                      help="Optional .py diagram file to auto-import on startup")
     ed_p.add_argument("--port", type=int, default=8888, help="Port (default: 8888)")
     ed_p.add_argument("--no-browser", action="store_true",
                       help="Don't open the browser automatically")
 
-    # ── export ──
-    ex_p = sub.add_parser("export", help="Export a .py diagram to PNG (headless browser)")
-    ex_p.add_argument("input",  help="Python diagrams source file (.py)")
-    ex_p.add_argument("output", nargs="?", help="Output PNG path (default: <input>.png)")
-    ex_p.add_argument("--port",   type=int, default=0,    help="Internal server port (0 = auto)")
-    ex_p.add_argument("--width",  type=int, default=1600, help="Browser viewport width (default: 1600)")
-    ex_p.add_argument("--height", type=int, default=900,  help="Browser viewport height (default: 900)")
-    ex_p.add_argument("--scale",  type=int, default=2,    help="Output resolution multiplier (default: 2)")
+    # ── skill-install ──
+    si_p = sub.add_parser("skill-install",
+                           help="Install the Claude Code skill into the current project")
+    si_p.add_argument("--global", action="store_true", dest="global_install",
+                      help="Install to ~/.claude/skills/ instead of ./.claude/skills/")
 
     args = parser.parse_args()
 
     if args.command == "editor":
         _run_editor(args)
-    elif args.command == "export":
-        _run_export(args)
+    elif args.command == "skill-install":
+        _run_skill_install(args)
     elif args.command == "run":
         _run_files(args.paths)
     else:

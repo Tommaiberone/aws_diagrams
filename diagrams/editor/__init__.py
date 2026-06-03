@@ -2,7 +2,7 @@
 Interactive web-based diagram editor.
 
 Usage:
-    diagrams editor [--port 8888]
+    diagrams editor [file.py] [--port 8888]
 
 Or programmatically:
     from diagrams.editor import launch
@@ -11,9 +11,10 @@ Or programmatically:
 import threading
 import time
 import webbrowser
+from typing import Optional
 
 
-def launch(port: int = 8888, open_browser: bool = True) -> None:
+def launch(port: int = 8888, open_browser: bool = True, initial_file: Optional[str] = None) -> None:
     """Start the editor server and (optionally) open the browser."""
     try:
         from flask import Flask  # noqa: F401
@@ -25,7 +26,7 @@ def launch(port: int = 8888, open_browser: bool = True) -> None:
 
     from .server import create_app
 
-    app = create_app()
+    app = create_app(initial_file=initial_file)
 
     if open_browser:
 

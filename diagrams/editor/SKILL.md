@@ -13,7 +13,7 @@ Generate architecture diagrams as Python code, then open them in the interactive
 |---|---|---|
 | uv | `uv --version` | [docs.astral.sh/uv](https://docs.astral.sh/uv/) |
 
-> **No other prerequisites required.** Everything runs via `uv run diagrams` (project-local) or `uvx --from diagrams-editor` (zero-install, any repo).
+> **No other prerequisites required.** Everything runs via `uvx --from diagrams-editor` which downloads and caches the package on demand.
 
 ## Workflow
 
@@ -88,26 +88,24 @@ with Diagram("<Title>", direction="LR"):
     svc >> Edge(label="query") >> db
 ```
 
-### Step 4 — Open the interactive editor
+### Step 4 — Tell the user how to open the editor
 
-After writing the `.py` file, open the visual editor so the user can adjust layout, labels, and download the PNG:
+Do **not** run any command. Instead, instruct the user to run this command in their terminal:
 
 ```bash
-uv run diagrams editor docs/architecture/<diagram-name>.py
+uvx --from diagrams-editor diagrams editor docs/architecture/<diagram-name>.py
 ```
 
-This starts a local web server and opens **http://localhost:8888** in the browser with the diagram already loaded.
-
-The user can:
+Explain that this starts a local web server at **http://localhost:8888** with the diagram already loaded, where they can:
 - Drag nodes to rearrange the layout
-- Double-click labels to rename
-- Download the final PNG with the **Export PNG** button
+- Double-click labels to rename them
+- Click **Export PNG** to download the final image
 
 ### Step 5 — Report output
 
 Tell the user:
 - **Script path**: `docs/architecture/<diagram-name>.py`
-- **Editor URL**: `http://localhost:8888`
+- **Command to launch the editor** (as above)
 - Brief summary of what the diagram shows
 
 ---
@@ -117,7 +115,7 @@ Tell the user:
 | Error | Fix |
 |---|---|
 | `ImportError: cannot import name 'X'` | Wrong module path — validate with `uv run python -c "from diagrams.X import Y; print('ok')"`. |
-| `warning: VIRTUAL_ENV=... does not match ...` | Harmless — another venv is active. Run `unset VIRTUAL_ENV` to suppress. |
+| `warning: VIRTUAL_ENV=... does not match ...` | Harmless — another venv is active. `uv run` ignores it. Run `unset VIRTUAL_ENV` to suppress. |
 | Port 8888 already in use | Use `--port 8889` (or any free port). |
 
 ## File naming
